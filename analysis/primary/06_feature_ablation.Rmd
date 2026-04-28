@@ -1,0 +1,183 @@
+---
+title: "08_feature_ablation"
+author: 'Andrea Polazzi'
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+# Setup
+
+## Prepare dataset
+
+```{r setup}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(caret)
+library(dplyr)
+source('../scripts/clean_columns.R')
+
+data <- read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+clean_data <- clean_pcawg_data(data)
+model_data <- clean_data[complete.cases(clean_data), -c(1,2)]
+model_data$alt_status <- factor(model_data$alt_status, levels=c("ALT-low","ALT-high"), labels = c("ALT_low","ALT_high"))
+summary(model_data)
+```
+
+## Define feature sets
+
+```{r feature-sets}
+feature_sets <- list(
+  full = model_data,
+  no_tel_insert = model_data[, !names(model_data) %in% "telomere_insertion_rate"],
+  no_tf = model_data[, !names(model_data) %in% "tf_rate"],
+  no_TERT = model_data[, !names(model_data) %in% "TERT_FPKM"],
+  no_tel_content = model_data[, !names(model_data) %in% "telomere_content_log2"],
+  no_TVRs = model_data[, -c(grep('singleton', names(model_data), ))]
+)
+```
+
+## CV setup
+
+```{r cv-setup}
+set.seed(21)
+folds <- createMultiFolds(model_data$alt_status, k = 5, times = 20)
+
+ctrl <- trainControl(
+  method = "repeatedcv",
+  number = 5,
+  repeats = 20,
+  index = folds,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = 'final'
+)
+```
+
+# Train models
+
+```{r training, warning=FALSE, message=FALSE}
+library(caret)
+library(pROC)
+library(dplyr)
+library(randomForest)
+
+results <- data.frame()
+all_resamples <- list()
+
+for (fs in names(feature_sets)) {
+  
+  df <- feature_sets[[fs]]
+  
+  log_model <- train(
+    alt_status ~ .,
+    data = df,
+    method = "glm",
+    family = "binomial",
+    metric = "ROC",
+    trControl = ctrl
+  )
+  
+  rf_model <- train(
+    alt_status ~ .,
+    data = df,
+    method = "rf",
+    metric = "ROC",
+    trControl = ctrl
+  )
+  
+  models <- list(LogReg = log_model, RF = rf_model)
+  
+  for (m in names(models)) {
+    
+    model <- models[[m]]
+    
+    rs <- model$resample
+    
+    rs$feature_set <- fs
+    rs$model <- m
+    
+    all_resamples[[paste(fs, m, sep = "_")]] <- rs
+    
+    results <- rbind(
+      results,
+      data.frame(
+        feature_set = fs,
+        model = m,
+        mean_AUC = mean(rs$ROC, na.rm = TRUE),
+        sd_AUC = sd(rs$ROC, na.rm = TRUE),
+        mean_sensitivity = mean(rs$Sens, na.rm = TRUE),
+        mean_specificity = mean(rs$Spec, na.rm = TRUE)
+      )
+    )
+  }
+}
+
+results <- results %>%
+  group_by(model) %>%
+  mutate(
+    delta_AUC = mean_AUC - mean_AUC[feature_set == "full"]
+  ) %>%
+  ungroup() 
+
+print(results, n = 12)
+```
+
+# Plots
+
+```{r plotting}
+ggplot(results, aes(x = feature_set, y = mean_AUC, fill = model)) +
+  geom_col(position = position_dodge2()) +
+  geom_errorbar(
+    aes(ymin = mean_AUC - sd_AUC, ymax = mean_AUC + sd_AUC),
+    position = position_dodge(width = 0.9),
+    width = 0.2
+  ) +
+  theme_bw()+
+  labs(x='Feature subset',
+       y='Average AUC',
+       title='Performance of models across feature subsets')
+
+ggplot(results, aes(x = feature_set, y = delta_AUC, fill = model)) +
+  geom_col(position = position_dodge2()) +
+  geom_hline(yintercept = 0, linetype = "dashed") +
+  labs(
+    x = "Feature subset",
+    y = "Change in ROC AUC vs full model",
+    title = "Impact of feature removal on model performance"
+  ) +
+  theme_bw()
+
+results_long <- results %>%
+  select(feature_set, model, mean_sensitivity, mean_specificity) %>%
+  pivot_longer(
+    cols = c(mean_sensitivity, mean_specificity),
+    names_to = "metric",
+    values_to = "value"
+  ) %>%
+  mutate(
+    metric = recode(
+      metric,
+      mean_sensitivity = "Sensitivity",
+      mean_specificity = "Specificity"
+    )
+  )
+
+ggplot(results_long, aes(x = feature_set, y = value, fill = feature_set)) +
+  geom_col(show.legend = FALSE) +
+  labs(
+    x = "Feature subset",
+    y = "Average value",
+    title = "Sensitivity and specificity across feature subsets"
+  ) +
+  theme_bw() +
+  facet_grid(metric ~ model)+ 
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+The **small increases** in AUC that we see we have after removing certain features such as telomeric content, TERT, or TF rate **are normal** and are due to random variation in the data and the training process. This can happen when the **removed feature is not very informative** for the model, or when **its contribution is overshadowed** by other features.
+
+**Removing TVR motif** features causes the **largest performance decrease** in both models, particularly for Random Forest, suggesting that telomere variant repeat composition contains strong predictive information for ALT status. **Removing telomere insertion rate** also **noticeably reduces performance**.
+
+Of course, **when removing TVR motifs we are removing 9 individual features instead of one**, and thus an abrupt decrease in performance can be expected. Although informative on TVR motifs contribution to classification, **the comparison is not fair**. What could be interesting is to perform a **LOFO on each individual TVR motif**, looking for the ones having more discriminatory power.

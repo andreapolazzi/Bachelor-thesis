@@ -1,0 +1,70 @@
+---
+title: "09_cancer_type_separation"
+author: 'Andrea Polazzi'
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+# Setup
+
+```{r setup}
+library(tidyverse, quietly = TRUE)
+library(readxl)
+source('../scripts/clean_columns.R')
+data <- read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+clean_data <- clean_pcawg_data(data)
+pca_data <- clean_data %>%
+  select(where(is.numeric)) %>%
+  na.omit()
+```
+
+# PCA
+
+```{r pca}
+pca <- prcomp(pca_data, center = T, scale. = T)
+scores <- as.data.frame(pca$x) %>%
+  mutate(
+    cancer_type = clean_data[complete.cases(clean_data),]$cancer_type,
+    alt_status = clean_data[complete.cases(clean_data),]$alt_status
+  )
+```
+
+# Biplot
+```{r biplot}
+loadings <- as.data.frame(pca$rotation) %>%
+  mutate(feature = rownames(.)) %>%
+  mutate(feature = gsub("_singleton_dist", "", feature)) %>%
+  arrange(desc(abs(PC1)))
+
+var_explained <- summary(pca)$importance[2,]
+
+library(ggrepel)
+loadings_plot <- loadings %>%
+  mutate(
+    PC1 = PC1 * 10,
+    PC2 = PC2 * 10
+  )
+
+scores %>% 
+  ggplot(aes(PC1, PC2, colour = cancer_type))+
+  geom_point(
+  aes(shape = alt_status, size = alt_status),
+  alpha = 0.6) +
+  scale_shape_manual(values = c("ALT-low" = 16, "ALT-high" = 17)) +
+  scale_size_manual(values = c("ALT-low" = 1.2, "ALT-high" = 3)) +
+  geom_segment(
+      data = loadings_plot,
+      aes(x = 0, y = 0, xend = PC1, yend = PC2),
+      arrow = arrow(length = unit(0.2,"cm")),
+      color = "black") +
+    geom_text_repel(
+      data = loadings_plot,
+      aes(PC1, PC2, label = feature),
+      size = 3,
+      inherit.aes = F) +
+  theme_bw()+
+  labs(x = paste0("PC1 (", round(var_explained[1]*100,1), "%)"),
+    y = paste0("PC2 (", round(var_explained[2]*100,1), "%)"),
+       title = 'PCA of all telomere features')
+```
+

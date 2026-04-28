@@ -1,0 +1,600 @@
+---
+title: "05_ALT_status_full"
+author: 'Andrea Polazzi'
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+# Setup
+
+Let's load the dataset and have a look at it.
+
+```{r setup}
+library(tidyverse)
+knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
+library(readxl, quietly = TRUE)
+data <- read_xlsx('../../data/raw/PCAWG_variables_PCA_woK.xlsx')
+summary(data)
+```
+
+We have to rename columns, set categories as factors, deal with NA values, and handle typing.
+
+```{r cleaning-data}
+source('../../scripts/clean_columns.R')
+clean_data <- clean_pcawg_data(data)
+summary(clean_data)
+```
+
+# Define the full dataset
+
+We must account for the fact that we have many **NA values**, especially in the **TERT_FPKM column**. These rows must be excluded, since further analyses such as PCA or RF require the absence of missing values. Therefore this extended model will use a subset of samples with complete **telomere biology annotations**.
+
+```{r model-data-full}
+model_data_full <- clean_data[complete.cases(clean_data),-c(1,2)]
+summary(model_data_full)
+```
+
+Now we don't have NA values anymore, but we should be aware of the fact that we are dealing with a **much smaller dataset** (1943 before, 817 now) and some cancer types are underrepresented or totally absent.
+
+# Correlation matrix
+
+```{r corr-matrix}
+corr_data <- model_data_full %>% 
+  select(-alt_status)
+
+cor_mat <- corr_data %>%
+  cor(method = "spearman", use = "pairwise.complete.obs")
+corrplot::corrplot(
+  cor_mat,
+  method = "color",
+  type = "upper",
+  order = "hclust",
+  tl.col = "black",
+  tl.cex = 0.55,
+  tl.srt = 45
+)
+```
+
+
+# PCA with all features
+
+```{r PCA_full}
+X <- scale(model_data_full[, -1])
+pca <- prcomp(X, center = TRUE, scale. = TRUE)
+summary(pca)
+
+library(ggplot2)
+
+pca_df <- data.frame(
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2],
+  ALT = model_data_full$alt_status
+)
+
+ggplot(pca_df, aes(PC1, PC2, color = ALT)) +
+  geom_point(alpha = 0.6) +
+  theme_minimal() +
+  labs(
+    title = "PCA of all features",
+    x = "PC1",
+    y = "PC2"
+  )
+
+pca$rotation
+```
+## Biplot
+
+```{r biplot}
+# sample coordinates
+scores <- data.frame(
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2],
+  ALT = model_data_full$alt_status
+)
+
+# motif vectors
+loadings <- data.frame(
+  PC1 = pca$rotation[,1],
+  PC2 = pca$rotation[,2],
+  comp_names = c(rownames(pca$rotation)[1:4], sapply(strsplit(rownames(pca$rotation)[5:13], split = '_', fixed = TRUE), `[`, 1))
+)
+
+# scale the loadings (smaller than sample coordinates) to make arrows more visible
+loadings$PC1 <- loadings$PC1 * 10
+loadings$PC2 <- loadings$PC2 * 10
+
+library(ggplot2)
+library(ggrepel)
+
+ggplot(scores, aes(PC1, PC2, color = ALT)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_segment(data = loadings,
+               aes(x = 0, y = 0, xend = PC1, yend = PC2),
+               arrow = arrow(length = unit(0.25,"cm")),
+               inherit.aes = FALSE,
+               color = "black") +
+  geom_text_repel(data = loadings,
+            aes(x = PC1, y = PC2, label = comp_names),
+            inherit.aes = FALSE,
+            size = 3.5,
+            ) +
+  theme_bw() +
+  coord_equal() +
+  labs(
+    title = "PCA biplot of all features",
+    x = "PC1",
+    y = "PC2"
+  )
+ggsave("../../outputs/PCA_biplot_all.pdf", width = 7, height = 6)
+```
+
+# UMAP plot
+
+```{r umap}
+library(umap)
+
+umap_df <- clean_data %>% 
+  select(-donor_id) %>% 
+  drop_na() %>% 
+  mutate(cancer_type = factor(cancer_type))
+
+top_n_types <- 12
+top_types <- umap_df %>%
+  count(cancer_type) %>%
+  slice_max(n, n = top_n_types) %>%
+  pull(cancer_type)
+
+type_colors <- setNames(
+  c(scales::hue_pal()(top_n_types), "grey70"),
+  c(sort(top_types), "Other")
+)
+
+umap_vars <- umap_df %>%
+  select(where(is.numeric))
+
+umap_config <- umap.defaults
+umap_config$n_neighbors  <- 30
+umap_config$min_dist     <- 0.1
+umap_config$random_state <- 21
+
+umap_res <- umap(scale(umap_vars), config = umap_config)
+
+top_types_chr <- as.character(top_types)
+
+scores_umap <- as.data.frame(umap_res$layout) %>%
+  rename(UMAP1 = V1, UMAP2 = V2) %>%
+  mutate(
+    cancer_type_plot = ifelse(
+      as.character(umap_df$cancer_type) %in% top_types_chr,
+      as.character(umap_df$cancer_type),
+      "Other"
+    ),
+    cancer_type_plot = factor(cancer_type_plot,
+                              levels = c(sort(top_types_chr), "Other")),
+    ALT_status = umap_df$alt_status
+  )
+
+scores_umap_all <- scores_umap %>%
+  mutate(cancer_type_all = factor(as.character(umap_df$cancer_type)))
+
+library(RColorBrewer)
+
+n_types <- length(levels(scores_umap_all$cancer_type_all))
+
+type_colors_all <- setNames(
+  pals::polychrome(n_types),
+  levels(scores_umap_all$cancer_type_all)
+)
+
+type_colors <- setNames(
+  c(pals::polychrome(top_n_types), "grey70"),
+  c(sort(top_types_chr), "Other")
+)
+
+ggplot(scores_umap_all, aes(UMAP1, UMAP2, color = cancer_type_all)) +
+  geom_point(aes(shape = ALT_status,
+                 size  = ALT_status,
+                 alpha = ALT_status)) +
+  scale_shape_manual(values = c("ALT-low" = 16, "ALT-high" = 17)) +
+  scale_size_manual(values  = c("ALT-low" = 1.5, "ALT-high" = 3)) +
+  scale_alpha_manual(values = c("ALT-low" = 0.7, "ALT-high" = 1)) +
+  scale_color_manual(values = type_colors_all) +
+  theme_bw() +
+  labs(
+    title = "UMAP - PCAWG dataset, all cancer types",
+    x = "UMAP1", y = "UMAP2",
+    color = "Cancer type",
+    shape = "ALT status", size = "ALT status", alpha = "ALT status"
+  )
+
+ggplot(scores_umap, aes(UMAP1, UMAP2)) +
+  geom_point(
+    data = filter(scores_umap, cancer_type_plot == "Other"),
+    aes(color = cancer_type_plot, size = ALT_status),
+    shape = 16, alpha = 0.3
+  ) +
+  geom_point(
+    data = filter(scores_umap, cancer_type_plot != "Other"),
+    aes(color = cancer_type_plot, shape = ALT_status, size = ALT_status),
+    alpha = 0.7
+  ) +
+  scale_color_manual(values = type_colors) +
+  scale_shape_manual(values = c("ALT-low" = 16, "ALT-high" = 17)) +
+  scale_size_manual(values = c("ALT-low" = 1.5, "ALT-high" = 3)) +
+  theme_bw() +
+  labs(
+    title = "UMAP - PCAWG dataset",
+    x = "UMAP1", y = "UMAP2",
+    color = "Cancer type", shape = "ALT status", size = "ALT status"
+  )
+
+ggplot(scores_umap, aes(UMAP1, UMAP2)) +
+  geom_point(
+    data = filter(scores_umap, ALT_status == "ALT-low"),
+    color = "grey80", size = 1.2, alpha = 0.3, shape = 16
+  ) +
+  geom_point(
+    data = filter(scores_umap, ALT_status == "ALT-high"),
+    color = "#E41A1C", size = 2, alpha = 0.8, shape = 17
+  ) +
+  theme_bw() +
+  labs(
+    title = "UMAP - PCAWG dataset, ALT status highlighted",
+    x = "UMAP1", y = "UMAP2"
+  )
+
+library(purrr)
+
+params_grid <- expand.grid(
+  n_neighbors = c(10, 15, 30, 50),
+  min_dist    = c(0.05, 0.1, 0.5)
+)
+
+umap_plots <- pmap(params_grid, function(n_neighbors, min_dist) {
+  
+  cfg <- umap.defaults
+  cfg$n_neighbors  <- n_neighbors
+  cfg$min_dist     <- min_dist
+  cfg$random_state <- 21
+  
+  res <- umap(scale(umap_vars), config = cfg)
+  
+  as.data.frame(res$layout) %>%
+    rename(UMAP1 = V1, UMAP2 = V2) %>%
+    mutate(
+      ALT_status = umap_df$alt_status,
+      n_neighbors = n_neighbors,
+      min_dist    = min_dist
+    )
+})
+
+all_umaps <- bind_rows(umap_plots)
+
+ggplot(all_umaps, aes(UMAP1, UMAP2)) +
+  geom_point(
+    data = filter(all_umaps, ALT_status == "ALT-low"),
+    color = "grey80", size = 0.8, alpha = 0.3, shape = 16
+  ) +
+  geom_point(
+    data = filter(all_umaps, ALT_status == "ALT-high"),
+    color = "#E41A1C", size = 1.5, alpha = 0.9, shape = 17
+  ) +
+  facet_grid(min_dist ~ n_neighbors,
+             labeller = label_both) +
+  theme_bw(base_size = 9) +
+  labs(
+    title = "UMAP parameter sensitivity - ALT status",
+    x = "UMAP1", y = "UMAP2"
+  )
+```
+
+# Split the dataset
+```{r train-test}
+set.seed(21)
+train_index <- sample(1:nrow(model_data_full), size = 0.5*nrow(model_data_full))
+train <- model_data_full[train_index,]
+test <- model_data_full[-train_index,]
+```
+
+# First classifier: Logistic Regression (all features)
+```{r logreg-full, warning=FALSE}
+logreg_model_full <- glm(alt_status~., data=train, family = 'binomial')
+
+prob <- predict(logreg_model_full, newdata = test, type = 'response')
+```
+
+## Evaluate performance
+
+```{r ROC-AUC-logreg-full}
+library(pROC, quietly = TRUE)
+
+roc_obj_full <- roc(
+  response = test$alt_status,
+  predictor = prob,
+  levels = c("ALT-low", "ALT-high"),
+  direction = "<"
+)
+
+plot(roc_obj_full, main = "ROC curve - Logistic regression (all features)", xlim = c(1, 0))
+
+auc(roc_obj_full)
+```
+
+When the model is trained using the **full set of telomere-related variables** (TVR motifs, TERT expression, telomere fusion rate, telomere insertions, and telomere content), the ROC curve shows almost perfect separation between ALT-high and ALT-low tumors. The **AUC of 0.998** indicates **near-perfect discriminatory ability**, meaning the model can almost always rank ALT-high tumors above ALT-low ones. Compared with the TVR-only model, this represents a **dramatic improvement** in predictive performance.
+
+```{r pred-prob-distribution, warning=FALSE} 
+prob_df <- data.frame(
+  prob = prob,
+  alt_status = test$alt_status
+)
+
+library(ggplot2)
+
+ggplot(prob_df, aes(x = prob, fill = alt_status)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  labs(
+    title = "Predicted probability distributions",
+    x = "Predicted probability of ALT-high",
+    y = "Density"
+  )
+```
+
+
+## Other metrics
+
+```{r confusion-matrix-logreg-full}
+pred_class <- ifelse(prob >= 0.5, "ALT-high", "ALT-low")
+pred_class <- factor(pred_class, levels = c("ALT-low", "ALT-high"))
+
+library(caret, quietly = TRUE)
+confusionMatrix(pred_class, test$alt_status, positive = 'ALT-high')
+```
+
+The confusion matrix confirms the excellent performance of the logistic regression model when all telomere-related features are included. The model achieves an **overall accuracy of 98.4%** and a **very high balanced accuracy of 99.1%**, indicating strong performance for both classes despite the dataset imbalance. Notably, the model reaches **perfect sensitivity (1.00)** for this fold, correctly identifying all ALT-high tumors in the test set, while maintaining a **high specificity of 98.3%**, meaning that most ALT-low tumors are also classified correctly. The positive predictive value of 0.79 reflects the fact that **some ALT-low tumors are still predicted as ALT-high**, but the negative predictive value of 1.00 shows that tumors predicted as ALT-high are always correct in this sample.
+
+# Second classifier: Random Forest
+
+```{r RF-full}
+library(randomForest, quietly = TRUE)
+rf_model_full <- randomForest(alt_status~., data=train, importance=T)
+rf_model_full
+```
+
+## Evaluate performance
+
+```{r ROC-AUC-RF-full}
+rf_prob_full <- predict(rf_model_full, test, type = "prob")[, "ALT-high"]
+
+library(pROC, quietly = TRUE)
+
+roc_rf_full <- roc(
+  response = test$alt_status,
+  predictor = rf_prob_full,
+  levels = c("ALT-low", "ALT-high")
+)
+
+plot(
+  roc_rf_full,
+  main = "ROC curve - Random Forest (TVR motifs)"
+)
+
+auc(roc_rf_full)
+```
+
+**Almost perfect** (AUC = 0.9877). With this sample, our Random Forest model achieves almost perfect discriminatory ability.
+
+## Other metrics
+
+```{r confusion-matrix-RF}
+rf_pred_full <- ifelse(rf_prob_full >= 0.5, "ALT-high", "ALT-low")
+rf_pred_full <- factor(rf_pred_full, levels = c("ALT-low", "ALT-high"))
+
+library(caret)
+
+confusionMatrix(
+  rf_pred_full,
+  test$alt_status,
+  positive = "ALT-high"
+)
+```
+
+With this fold, the RF model achieved **slightly worse performances** with respect to Log. Reg., but still very good. We should be careful to not interpret this results as a general metric of performance, since we did not do CV yet.
+
+```{r feature-importance}
+varImpPlot(rf_model_full, main = 'Variable importance plot - Random Forest (all features)' )
+```
+
+# Cross Validation of the performances
+
+To assess the robustness of these two predictive models, we conducted **repeated stratified cross-validation**. 
+
+```{r metric-helper, message=FALSE, warning=FALSE}
+get_fold_metrics <- function(prob, truth, positive_class = "ALT-high", threshold = 0.5) {
+  
+  negative_class <- setdiff(levels(truth), positive_class)
+  
+  pred <- ifelse(prob > threshold, positive_class, negative_class) %>%
+    factor(levels = levels(truth))
+  
+  cm <- confusionMatrix(
+    data = pred,
+    reference = truth,
+    positive = positive_class
+  )
+  
+  roc_obj <- roc(
+    response = truth,
+    predictor = prob,
+    levels = c(negative_class, positive_class),
+    quiet = TRUE
+  )
+  
+  tibble(
+    auc = as.numeric(auc(roc_obj)),
+    sensitivity = unname(cm$byClass["Sensitivity"]),
+    specificity = unname(cm$byClass["Specificity"]),
+    precision = unname(cm$byClass["Pos Pred Value"]),
+    recall = unname(cm$byClass["Recall"]),
+    f1 = unname(cm$byClass["F1"]),
+    balanced_accuracy = unname(cm$byClass["Balanced Accuracy"])
+  )
+}
+```
+
+## Logistic Regression - CV
+
+```{r logreg-CV, message=FALSE, warning=FALSE}
+library(pROC)
+library(caret)
+library(dplyr)
+
+set.seed(21)
+
+cv_data <- model_data_full
+k <- 5
+n_repeats <- 5
+
+logreg_results <- tibble()
+
+for (r in 1:n_repeats) {
+  fold_id <- integer(nrow(cv_data))
+  
+  idx_low  <- which(cv_data$alt_status == "ALT-low")
+  idx_high <- which(cv_data$alt_status == "ALT-high")
+  
+  fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
+  fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
+  
+  for (fold in 1:k) {
+    train_cv <- cv_data[fold_id != fold, ]
+    test_cv  <- cv_data[fold_id == fold, ]
+    
+    logreg_cv_model <- glm(
+      alt_status ~ .,
+      data = train_cv,
+      family = "binomial"
+    )
+    
+    logreg_cv_prob <- predict(logreg_cv_model, test_cv, type = "response")
+    
+    fold_metrics <- get_fold_metrics(
+      prob = logreg_cv_prob,
+      truth = test_cv$alt_status,
+      positive_class = "ALT-high",
+      threshold = 0.3
+    ) %>%
+      mutate(
+        rep = r,
+        fold = fold,
+        model = "Logistic regression"
+      )
+    
+    logreg_results <- bind_rows(logreg_results, fold_metrics)
+  }
+}
+
+logreg_results
+```
+
+```{r logreg-summary, message=FALSE, warning=FALSE}
+logreg_summary <- logreg_results %>%
+  summarise(
+    across(
+      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      list(mean = mean, sd = sd),
+      .names = "{.col}_{.fn}"
+    )
+  )
+
+logreg_summary
+```
+
+## Random Forest - CV
+
+```{r rf-CV-metrics, message=FALSE, warning=FALSE}
+library(randomForest)
+library(pROC)
+library(caret)
+library(dplyr)
+
+set.seed(21)
+
+cv_data <- model_data_full
+k <- 5
+n_repeats <- 5
+
+rf_results <- tibble()
+
+for (r in 1:n_repeats) {
+  fold_id <- integer(nrow(cv_data))
+  
+  idx_low  <- which(cv_data$alt_status == "ALT-low")
+  idx_high <- which(cv_data$alt_status == "ALT-high")
+  
+  fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
+  fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
+  
+  for (fold in 1:k) {
+    train_cv <- cv_data[fold_id != fold, ]
+    test_cv  <- cv_data[fold_id == fold, ]
+    
+    rf_cv_model <- randomForest(
+      alt_status ~ .,
+      data = train_cv,
+      ntree = 500,
+      mtry = 2
+    )
+    
+    rf_cv_prob <- predict(rf_cv_model, test_cv, type = "prob")[, "ALT-high"]
+    
+    fold_metrics <- get_fold_metrics(
+      prob = rf_cv_prob,
+      truth = test_cv$alt_status,
+      positive_class = "ALT-high",
+      threshold = 0.3
+    ) %>%
+      mutate(
+        rep = r,
+        fold = fold,
+        model = "Random forest"
+      )
+    
+    rf_results <- bind_rows(rf_results, fold_metrics)
+  }
+}
+
+rf_results
+```
+
+```{r rf-summary, message=FALSE, warning=FALSE}
+rf_summary <- rf_results %>%
+  summarise(
+    across(
+      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      list(mean = mean, sd = sd),
+      .names = "{.col}_{.fn}"
+    )
+  )
+
+rf_summary
+```
+
+```{r compare-models, message=FALSE, warning=FALSE}
+all_results <- bind_rows(logreg_results, rf_results)
+
+model_comparison <- all_results %>%
+  group_by(model) %>%
+  summarise(
+    across(
+      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      list(mean = mean, sd = sd),
+      .names = "{.col}_{.fn}"
+    ),
+    .groups = "drop"
+  )
+
+model_comparison
+```
+
+

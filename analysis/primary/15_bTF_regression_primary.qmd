@@ -1,0 +1,27 @@
+---
+title: "15_bTF_regression_primary"
+date: today
+format:
+  html:
+    toc: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+---
+
+# Setup
+
+```{r setup}
+library(tidyverse)
+library(glmnet)
+library(here)
+library(randomForest)
+library(caret)
+
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+clean_data <- data %>% 
+  drop_na()
+summary(clean_data)
+```

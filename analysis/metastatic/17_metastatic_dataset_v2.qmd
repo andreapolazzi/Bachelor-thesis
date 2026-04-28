@@ -1,0 +1,74 @@
+---
+title: "17_metastatic_dataset_v2"
+date: today
+format:
+  html:
+    toc: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+---
+
+# Setup
+
+Here we repeat the analysis of the notebook `12_metastatic_dataset.Rmd`, but using the corrected column about normalized telomere insertion.
+
+We also **remove strong outliers** that can distort our plots and analyses.
+
+```{r setup}
+library(tidyverse)
+data <- readRDS('../data/processed/drivers_telins.rds')
+filt_data <- data %>% 
+  drop_na(tel_ins_norm) %>% 
+  select(tumor_tf_rate, tel_ins_norm, tel_reads_total, TCAGGG_singletons_norm_by_all_reads,
+        TGAGGG_singletons_norm_by_all_reads, TTGGGG_singletons_norm_by_all_reads, TTCGGG_singletons_norm_by_all_reads,
+        TTTGGG_singletons_norm_by_all_reads, ATAGGG_singletons_norm_by_all_reads, CTAGGG_singletons_norm_by_all_reads,
+        GTAGGG_singletons_norm_by_all_reads, TAAGGG_singletons_norm_by_all_reads, tvr_all) %>% 
+  rename_with(~gsub('_singletons_norm_by_all_reads', '', .)) %>% 
+  filter(tel_ins_norm<7500, tumor_tf_rate<50)
+```
+
+# PCA biplots
+
+```{r pca-biplot, warning=FALSE}
+X <- scale(filt_data)
+pca <- prcomp(X, center = TRUE, scale. = TRUE)
+var_explained <- summary(pca)$importance[2,]
+
+scores <- data.frame(
+    PC1 = pca$x[,1],
+    PC2 = pca$x[,2]
+  )
+
+loadings <- data.frame(
+    PC1 = pca$rotation[,1],
+    PC2 = pca$rotation[,2],
+    comp_names = rownames(pca$rotation)
+  )
+
+loadings$PC1 <- loadings$PC1 * 80
+loadings$PC2 <- loadings$PC2 * 80
+
+library(ggrepel)
+
+scores %>% 
+  ggplot(aes(PC1, PC2))+
+  geom_point(alpha=0.4, size=2, color = 'purple')+
+  geom_segment(data = loadings,
+               aes(x = 0, y = 0, xend = PC1, yend = PC2),
+               arrow = arrow(length = unit(0.25,"cm")),
+               inherit.aes = FALSE,
+               color = 'black')+
+  geom_text_repel(data = loadings,
+                  aes(x = PC1, y = PC2, label = comp_names),
+                  inherit.aes = FALSE,
+                  size = 3.5) +
+  theme_bw() +
+  coord_equal() +
+  labs(title = 'PCA biplot on Hartwig dataset',
+       x = paste0('PC1 (', round(var_explained[1]*100, 1), '%)'),
+       y = paste0('PC2 (', round(var_explained[2]*100, 1), '%)')
+  )
+```

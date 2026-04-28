@@ -1,0 +1,247 @@
+---
+title: "11_LASSO_ALT_status"
+author: "Andrea Polazzi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Setup
+
+```{r setup, message=FALSE, warning=FALSE}
+library(readxl)
+library(tidyverse)
+library(pROC)
+library(glmnet)
+
+source('../scripts/clean_columns.R')
+
+data <- read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+clean_data <- clean_pcawg_data(data)
+
+# Complete cases only, drop sample ID columns
+model_data <- clean_data[complete.cases(clean_data), -c(1, 2)]
+summary(model_data)
+```
+
+# Motivation
+
+The previous analyses (PCA, Random Forest, feature ablation) identified a set of predictors relevant to ALT-high/ALT-low classification, but using methods that do not provide formal effect size estimates or automatic variable selection. LASSO-penalized logistic regression instead does:
+
+- **automatic variable selection** via shrinkage of coefficients to zero
+- **effect sizes on a common scale** when predictors are pre-standardized
+- **regularization** that reduces overfitting, particularly useful in the presence of correlated predictors (such as TVR motifs)
+
+# Data preparation
+
+Before passing data to `cv.glmnet`, we explicitly standardize the predictor matrix. This is necessary to make LASSO coefficients comparable across variables on different scales (e.g. `TERT_FPKM` vs `telomere_insertion_rate`). We then disable the internal standardization in `glmnet` to avoid double transformation.
+
+```{r prepare}
+X <- scale(as.matrix(model_data[, -1]))
+y <- model_data$alt_status
+```
+
+We verify the distribution of the response variable to document class imbalance.
+
+```{r class-balance}
+table(y, dnn = "ALT status")
+```
+
+# Cross-validation for λ selection
+
+We use `cv.glmnet` with 10 folds and `alpha = 1` (pure LASSO). The optimized metric is binomial deviance. We evaluate two standard thresholds:
+
+- **`lambda.min`**: λ minimizing CV error — richer model, maximum predictive performance
+- **`lambda.1se`**: λ within 1 SE of the minimum — more parsimonious model, preferable for biological interpretation
+
+```{r cv-lasso}
+set.seed(21)
+cv_fit <- cv.glmnet(
+  X, y,
+  alpha = 1,
+  family = "binomial",
+  standardize = FALSE,  # already standardized manually
+  nfolds = 10,
+  keep = TRUE    # enables fit.preval for out-of-fold predictions
+)
+```
+
+```{r plot-cv, fig.cap="CV deviance as a function of log(λ). Vertical lines indicate lambda.min (left) and lambda.1se (right). Numbers on top indicate the count of non-zero predictors."}
+plot(cv_fit)
+```
+
+```{r lambda-values}
+cat("lambda.min:", cv_fit$lambda.min, "\n")
+cat("lambda.1se:", cv_fit$lambda.1se, "\n")
+```
+
+The cross-validation plot shows that λ.min and λ.1se correspond to the same number of non-zero coefficients (7), indicating that the selected model is stable with respect to regularization strength. In other words, **increasing λ from λ.min to λ.1se does not remove any predictors**, suggesting that **all selected variables have sufficient signal** to survive additional penalization and are not borderline inclusions.
+
+# LASSO coefficients
+
+We have seen that both values for λ correspond to 7 predictors retained, but are they the same 7?
+
+We extract and compare coefficients at both λ values. The main biological interest lies in the **selection** (which variables are sent to 0) and in the **directions and relative magnitudes** of non-zero coefficients.
+
+```{r coefficients}
+coef_min <- coef(cv_fit, s = "lambda.min")
+coef_1se <- coef(cv_fit, s = "lambda.1se")
+
+# Build a comparison dataframe, excluding the intercept
+coef_df <- data.frame(
+  feature    = rownames(coef_min)[-1],
+  lambda_min = as.numeric(coef_min)[-1],
+  lambda_1se = as.numeric(coef_1se)[-1]
+) %>%
+  mutate(
+    selected_min = lambda_min != 0,
+    selected_1se = lambda_1se != 0,
+    feature = gsub("_singleton_dist", "", feature)  # cleaner labels
+  ) %>%
+  arrange(desc(abs(lambda_1se)))
+
+print(coef_df)
+```
+
+## Coefficient visualization
+
+```{r plot-coefficients, fig.cap="Standardized LASSO coefficients at both λ values. Zero values indicate variables excluded from the model."}
+coef_long <- coef_df %>%
+  pivot_longer(
+    cols = c(lambda_min, lambda_1se),
+    names_to = "lambda",
+    values_to = "coefficient"
+  ) %>%
+  mutate(
+    lambda  = recode(lambda,
+                     lambda_min = "lambda.min",
+                     lambda_1se = "lambda.1se"),
+    feature = reorder(feature, abs(coefficient))
+  )
+
+ggplot(coef_long, aes(x = coefficient, y = feature, fill = lambda)) +
+  geom_col(position = position_dodge(width = 0.7), width = 0.6) +
+  geom_vline(xintercept = 0, linetype = "dotted", color = "grey70") +
+  scale_fill_manual(values = c("lambda.min" = "royalblue", "lambda.1se" = "coral")) +
+  theme_bw() +
+  labs(
+    x = "LASSO coefficient (standardized scale)",
+    y = NULL,
+    fill = "λ",
+    title = "LASSO coefficients for ALT status prediction"
+  )
+```
+
+Both lambda values agree on the majority of predictors, apart from the TVR motifs **GTAGGG (only present for lambda.min)** and **TCAGGG (present only for lambda.1se)**. Their borderline contribution should be discussed, to decide whether they can be considered as meaningful predictors or unstable ones coming from λ value perturbations.
+
+**Telomere insertion** confirmes itself again as a **strong predictor**.
+
+# Distribution of `telomere_insertion_rate`
+
+The large coefficient of `telomere_insertion_rate` suggests very strong class separation. We visualize its distribution to assess whether near-perfect separation is occurring, which would cause coefficient inflation even after regularization.
+
+```{r tel-ins-distribution}
+ggplot(model_data, aes(x = alt_status, y = telomere_insertion_rate, fill = alt_status)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.35, size = 1) +
+  theme_bw() +
+  labs(
+    x     = NULL,
+    y     = "Telomere insertion rate",
+    title = "Distribution of telomere_insertion_rate by ALT status"
+  ) +
+  theme(legend.position = "none")
+```
+
+The boxplot shows that **ALT-low samples are tightly concentrated near zero**, while **ALT-high samples have substantially higher and more variable values**, extending well above 1. There is minimal overlap between the main distributions, indicating **strong separation** between groups based on this feature.
+
+# Predictive performance
+
+We evaluate the LASSO model with `lambda.1se` via ROC/AUC. Since CV was already performed for λ selection, we use the out-of-fold predictions stored in `cv_fit$fit.preval` for an unbiased performance estimate. Using these instead of refitting on the full dataset avoids the optimistic bias that would arise from evaluating on training data.
+
+```{r roc-oof}
+# Index of lambda.1se in the path (robust to floating point)
+idx_1se   <- which.min(abs(cv_fit$lambda - cv_fit$lambda.1se))
+oof_probs <- cv_fit$fit.preval[, idx_1se]
+
+roc_lasso <- roc(
+  response  = y,
+  predictor = oof_probs,
+  levels    = c("ALT-low", "ALT-high"),
+  direction = "<"
+)
+
+plot(roc_lasso,
+     main = "ROC curve - LASSO (lambda.1se, out-of-fold)",
+     xlim = c(1, 0))
+
+cat("AUC (out-of-fold, lambda.1se):", round(auc(roc_lasso), 4), "\n")
+```
+
+The ROC curve rises sharply, achieving **high sensitivity** at **near-perfect specificity**. This indicates strong discriminative performance, with the model accurately separating ALT-high from ALT-low samples based on predicted probabilities. The **AUC value is 0.9828**. 
+
+# Post-selection refitting
+
+LASSO coefficients are biased toward zero by construction and cannot be used as formal effect sizes. The standard approach is to refit an ordinary logistic regression on the variables selected by `lambda.1se` (*post-selection refitting*), which yields unpenalized coefficients with standard errors and interpretable p-values.
+
+```{r post-selection, warning=FALSE}
+# Reconstruct original column names for TVR motifs
+selected <- coef_df %>%
+  filter(selected_1se) %>%
+  pull(feature) %>%
+  gsub("ATAGGG", "ATAGGG_singleton_dist", .) %>%
+  gsub("TAAGGG", "TAAGGG_singleton_dist", .) %>%
+  gsub("TCAGGG", "TCAGGG_singleton_dist", .) %>%
+  gsub("TGAGGG", "TGAGGG_singleton_dist", .) %>%
+  gsub("TTTGGG", "TTTGGG_singleton_dist", .)
+
+cat("Variables selected by lambda.1se:\n")
+print(selected)
+
+model_sel <- model_data[, c("alt_status", selected)]
+post_fit  <- glm(alt_status ~ ., data = model_sel, family = "binomial")
+summary(post_fit)
+```
+
+```{r plot-OR, fig.cap="Odds ratios and 95% confidence intervals for variables selected by LASSO (post-selection refitting). Log scale.", warning=FALSE, message=FALSE}
+or_df <- data.frame(
+  feature = names(coef(post_fit))[-1],
+  OR = exp(coef(post_fit))[-1],
+  CI_low = exp(confint(post_fit))[-1, 1],
+  CI_high = exp(confint(post_fit))[-1, 2]
+) %>%
+  mutate(feature = gsub("_singleton_dist", "", feature)) %>%
+  arrange(OR)
+
+ggplot(or_df, aes(x = OR, y = reorder(feature, OR))) +
+  geom_point(size = 3) +
+  geom_errorbarh(aes(xmin = CI_low, xmax = CI_high), height = 0.3) +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
+  scale_x_log10() +
+  theme_bw() +
+  labs(
+    x = "Odds Ratio (log10 scale, 95% CI)",
+    y = NULL,
+    title = "Odds Ratios — post-LASSO logistic regression"
+  )
+```
+
+The odds ratio plot shows that **telomere_insertion_rate has an extremely large effect size**, with a **very wide confidence interval**. All other variables have odds ratios close to 1, indicating much smaller effects. This suggests that the model’s predictive power is primarily driven by telomere_insertion_rate, with other variables contributing only marginally.
+
+# Summary
+
+```{r summary-table}
+summary_table <- coef_df %>%
+  filter(selected_1se) %>%
+  select(feature, lambda_min, lambda_1se) %>%
+  mutate(
+    across(where(is.numeric), ~ round(.x, 3)),
+    association = ifelse(lambda_1se > 0, "ALT-high", "ALT-low")
+  )
+
+knitr::kable(
+  summary_table,
+  col.names = c("Feature", "Coeff. lambda.min", "Coeff. lambda.1se", "Association"),
+  caption   = "Variables selected by LASSO (lambda.1se) with standardized coefficients and direction of association with ALT status."
+)
+```
+

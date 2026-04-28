@@ -1,0 +1,117 @@
+---
+title: "TF-blood_vs_primary"
+format: pdf
+date: today
+execute:
+  echo: true
+  warning: false
+  message: false
+  freeze: auto
+---
+
+# Setup and data loading
+
+```{r setup}
+library(tidyverse)
+library(here)
+library(corrplot)
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+clean_data <- data
+summary(clean_data)
+```
+
+# Distributions
+
+## Distributions - summary
+
+```{r summary-distributions}
+summary(clean_data$tf_blood_rate)
+summary(clean_data$tf_primary_rate)
+
+zero_blood <- sum(clean_data$tf_blood_rate == 0)/nrow(clean_data) * 100
+zero_primary <- sum(clean_data$tf_primary_rate == 0)/nrow(clean_data) * 100
+
+cat("Percentuale di zeri in tf_blood_rate: ", zero_blood, "%\n")
+
+cat("Percentuale di zeri in tf_primary_rate: ", zero_primary, "%\n")
+```
+
+## Distributions - visual
+
+```{r visual-distributions}
+clean_data %>% 
+  ggplot(aes(x = tf_blood_rate)) +
+  geom_histogram(binwidth = 0.01, fill = "blue", color = "black", alpha = 0.7) +
+  labs(title = "Distribution of tf_blood_rate", x = "tf_blood_rate", y = "Frequency")
+
+clean_data %>% 
+  ggplot(aes(x = tf_primary_rate)) +
+  geom_histogram(binwidth = 0.1, fill = "green", color = "black", alpha = 0.7) +
+  labs(title = "Distribution of tf_primary_rate", x = "tf_primary_rate", y = "Frequency")
+
+clean_data %>% 
+  ggplot(aes(x = "", y = tf_blood_rate)) +
+  geom_boxplot(fill = "blue", color = "black") +
+  labs(title = "Boxplot of tf_blood_rate", y = "tf_blood_rate")
+
+clean_data %>% 
+  ggplot(aes(x = "", y = tf_primary_rate)) +
+  geom_boxplot(fill = "green", color = "black") +
+  labs(title = "Boxplot of tf_primary_rate", y = "tf_primary_rate")
+```
+
+# Scatter plots
+
+## Scatterplot raw
+
+```{r scatterplot-raw}
+clean_data %>% 
+  ggplot(aes(tf_blood_rate, tf_primary_rate)) +
+  geom_point(alpha = 0.5, color = "darkblue") +
+  labs(title = "Scatterplot tf_blood_rate vs tf_primary_rate", x = "tf_blood_rate", y = "tf_primary_rate")
+```
+
+## Scatterplot log1p transformed
+
+```{r scatterplot-log1p}
+clean_data %>% 
+  ggplot(aes(log1p(tf_blood_rate), log1p(tf_primary_rate))) +
+  geom_point(alpha = 0.5, color = "darkred") +
+  labs(title = "Scatterplot log1p(tf_blood_rate) vs log1p(tf_primary_rate)", x = "log1p(tf_blood_rate)", y = "log1p(tf_primary_rate)")
+```
+
+# Distinction zero vs positive
+
+```{r zero-vs-positive}
+clean_data <- clean_data %>% 
+  mutate(blood_pos = ifelse(tf_blood_rate > 0, 1, 0),
+         primary_pos = ifelse(tf_primary_rate > 0, 1, 0))
+
+table(clean_data$blood_pos, clean_data$primary_pos, dnn = c('blood_pos', 'primary_pos'))
+chisq.test(table(clean_data$blood_pos, clean_data$primary_pos))
+
+ggplot(clean_data, aes(x = as.factor(blood_pos), fill = as.factor(primary_pos))) +
+  geom_bar(position = "fill") +
+  labs(title = "Proportion of signal presence between blood and primary", x = "blood_pos", y = "Proporzione") +
+  scale_fill_manual(values = c("red", "green"), labels = c("0", "1"))
+```
+
+# Spearman correlation
+
+```{r cor-spearman}
+positive_data <- clean_data %>% 
+  filter(blood_pos == 1 & primary_pos == 1)
+
+cor.test(positive_data$tf_blood_rate[positive_data$blood_pos == 1],
+         positive_data$tf_primary_rate[positive_data$primary_pos == 1],
+         method = 'spearman')
+```
+
+# Relationship visualization
+
+```{r relationship-visualization}
+ggplot(positive_data, aes(x = log1p(tf_blood_rate), y = log1p(tf_primary_rate))) +
+  geom_point(alpha = 0.5, color = "darkred") +
+  geom_smooth(method = "loess", color = "blue") +
+  labs(title = "tf_blood_rate vs tf_primary_rate", x = "log1p(tf_blood_rate)", y = "log1p(tf_primary_rate)")
+```

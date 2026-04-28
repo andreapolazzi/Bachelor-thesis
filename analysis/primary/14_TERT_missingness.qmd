@@ -1,0 +1,145 @@
+---
+title: "14_TERT_missingness"
+date: today
+format:
+  html:
+    toc: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+---
+
+# Setup
+
+We load the dataset and the necessary libraries
+
+```{r setup}
+library(tidyverse)
+library(naniar)
+library(here)
+source(here('scripts', 'clean_columns.R'))
+
+data <- readxl::read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
+clean_data <- clean_pcawg_data(data)
+
+data_analysis <- clean_data %>%
+  mutate(
+    tert_missing_indicator = is.na(TERT_FPKM),
+    tert_observed = !is.na(TERT_FPKM)
+  )
+```
+
+# Visualize missingness pattern
+
+```{r visualize}
+cat("=== MISSINGNESS OVERVIEW ===\n")
+print(naniar::miss_var_summary(clean_data))
+cat("\nTERT NA:", round(sum(is.na(clean_data$TERT_FPKM))/nrow(clean_data)*100, 1), "%\n")
+
+cat('=== MISSING DATA HEATMAP ===\n')
+vis_miss(clean_data, sort_miss = TRUE)
+
+clean_data %>% 
+  mutate(missing_tert = factor(is.na(TERT_FPKM),
+                                levels = c('TRUE', 'FALSE'),
+                                labels = c('Missing', 'Not Missing'))) %>% 
+  ggplot(aes(x = alt_status, fill = missing_tert))+
+  geom_histogram(position = 'stack', stat = 'count')+
+  labs(title = 'Distribution of ALT status for Missing vs. Non-Missing',
+       x = 'ALT status',
+       y = 'Counts',
+       fill = 'Missingness')+
+  theme_bw()
+
+## or more variables ####
+clean_data %>% 
+  filter(telomere_insertion_rate < 4, tf_rate < 15) %>% 
+  select(TERT_FPKM, tf_rate, telomere_insertion_rate, telomere_content_log2) %>% 
+  ggplot(aes(x = tf_rate,
+             y = telomere_insertion_rate,
+             size = telomere_content_log2,
+             colour = is.na(TERT_FPKM)))+
+  geom_point(alpha=0.6)+
+  facet_wrap(~is.na(TERT_FPKM))+
+  labs(title = 'Missing TERT data by TF rate and Telomeric Insertion',
+       x = 'TF rate',
+       y = 'Telomeric insertion',
+       color = 'Missing TERT data')+
+  theme_bw()
+```
+
+# Distribution comparisons
+
+```{r distributions-comparison}
+cat("\n=== Comparison TERT Present vs Missing ===\n")
+ 
+# Seleziona variabili numeriche e categoriche rilevanti
+numeric_vars <- c("tf_rate", "telomere_insertion_rate", 
+                  "telomere_content_log2", "TERT_FPKM",
+                  "ATAGGG_singleton_dist", "CTAGGG_singleton_dist", 
+                  "GTAGGG_singleton_dist", "TAAGGG_singleton_dist",
+                  "TCAGGG_singleton_dist", "TGAGGG_singleton_dist",
+                  "TTCGGG_singleton_dist", "TTGGGG_singleton_dist",
+                  "TTTGGG_singleton_dist")
+ 
+# Filtra solo variabili numeriche che esistono nel dataset
+numeric_vars <- numeric_vars[numeric_vars %in% names(clean_data)]
+ 
+# Confronto per variabili numeriche
+comparison_numeric <- data_analysis %>%
+  group_by(tert_missing_indicator) %>%
+  summarise(
+    n = n(),
+    across(all_of(numeric_vars), list(mean = ~mean(., na.rm = TRUE),
+                                       sd = ~sd(., na.rm = TRUE),
+                                       median = ~median(., na.rm = TRUE)),
+           .names = "{.col}_{.fn}")
+  )
+ 
+# Presenta in formato più leggibile
+for (var in numeric_vars) {
+  cat("---", var, "---\n")
+  
+  tert_present <- clean_data[[var]][!is.na(clean_data$TERT_FPKM)]
+  tert_missing <- clean_data[[var]][is.na(clean_data$TERT_FPKM)]
+  
+  cat("TERT Present  | Mean:", round(mean(tert_present, na.rm=T), 4),
+      "| SD:", round(sd(tert_present, na.rm=T), 4),
+      "| Median:", round(median(tert_present, na.rm=T), 4), "\n")
+  cat("TERT Missing  | Mean:", round(mean(tert_missing, na.rm=T), 4),
+      "| SD:", round(sd(tert_missing, na.rm=T), 4),
+      "| Median:", round(median(tert_missing, na.rm=T), 4), "\n\n")
+}
+ 
+# Confronto per cancer_type
+cat("\n--- cancer_type ---\n")
+comparison_cancer <- data_analysis %>%
+  group_by(cancer_type, tert_missing_indicator) %>%
+  summarise(n = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = tert_missing_indicator, values_from = n, values_fill = 0) %>%
+  mutate(
+    total = `FALSE` + `TRUE`,
+    pct_missing = round(100 * `TRUE` / total, 1)
+  ) %>%
+  arrange(desc(pct_missing))
+ 
+cat("TERT Missing % by Cancer Type:\n")
+print(comparison_cancer, n = nrow(comparison_cancer))
+
+# Confronto per alt_staus
+cat("\n--- alt_status ---\n")
+comparison_alt <- data_analysis %>%
+  group_by(alt_status, tert_missing_indicator) %>%
+  summarise(n = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = tert_missing_indicator, values_from = n, values_fill = 0) %>%
+  mutate(
+    total = `FALSE` + `TRUE`,
+    pct_missing = round(100 * `TRUE` / total, 1)
+  ) %>%
+  arrange(desc(pct_missing))
+ 
+cat("TERT Missing % by Cancer Type:\n")
+print(comparison_alt, n = nrow(comparison_alt))
+```

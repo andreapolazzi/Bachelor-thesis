@@ -1,0 +1,268 @@
+---
+title: "15_dataset_balancing"
+date: today
+format:
+  html:
+    toc: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+---
+
+```{r setup}
+library(tidyverse)
+library(caret)
+library(ROSE)
+library(randomForest)
+library(pROC)
+source("../scripts/clean_columns.R")
+
+data <- readxl::read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+
+clean_data <- clean_pcawg_data(data) %>%
+  drop_na() %>% 
+  select(-c(1, 2)) %>%
+  mutate(
+    alt_status = factor(alt_status),
+    alt_status = forcats::fct_recode(
+      alt_status,
+      "ALT_high" = "ALT-high",
+      "ALT_low"  = "ALT-low"
+    ),
+    alt_status = forcats::fct_relevel(alt_status, "ALT_low", "ALT_high")
+  )
+
+summary(clean_data)
+```
+
+------------------------------------------------------------------------
+
+```{r metric-helper}
+get_fold_metrics <- function(prob_alt, truth, threshold = 0.5, positive_class = "ALT_high") {
+  
+  negative_class <- setdiff(levels(truth), positive_class)
+  
+  pred <- ifelse(prob_alt >= threshold, positive_class, negative_class) %>%
+    factor(levels = levels(truth))
+  
+  cm <- confusionMatrix(pred, truth, positive = positive_class)
+  
+  roc_obj <- pROC::roc(
+    response = truth,
+    predictor = prob_alt,
+    levels = c(negative_class, positive_class),
+    quiet = TRUE
+  )
+  
+  tibble(
+    auc = as.numeric(pROC::auc(roc_obj)),
+    sensitivity = unname(cm$byClass["Sensitivity"]),
+    precision = unname(cm$byClass["Pos Pred Value"]),
+    f1 = unname(cm$byClass["F1"]),
+    balanced_accuracy = unname(cm$byClass["Balanced Accuracy"])
+  )
+}
+
+summarise_cv_metrics <- function(pred_df, threshold = 0.5) {
+  pred_df %>%
+    group_by(Resample) %>%
+    group_modify(~ get_fold_metrics(
+      prob_alt = .x$ALT_high,
+      truth = .x$obs,
+      threshold = threshold
+    )) %>%
+    ungroup()
+}
+
+summarise_mean_sd <- function(metrics_df, method_name) {
+  metrics_df %>%
+    summarise(
+      across(
+        .cols = c(auc, sensitivity, precision, f1, balanced_accuracy),
+        .fns  = list(mean = mean, sd = sd),
+        na.rm = TRUE
+      )
+    ) %>%
+    mutate(method = method_name) %>%
+    select(method, everything())
+}
+
+make_class_weights <- function(y) {
+  tab <- table(y)
+  w <- 1 / tab
+  weights <- unname(w[as.character(y)])
+  weights / mean(weights)
+}
+```
+
+```{r cv-control}
+set.seed(21)
+
+ctrl_none <- trainControl(
+  method = "repeatedcv",
+  number = 5,
+  repeats = 10,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = "final"
+)
+
+ctrl_rose <- trainControl(
+  method = "repeatedcv",
+  number = 5,
+  repeats = 10,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = "final",
+  sampling = "rose"
+)
+
+ctrl_smote <- trainControl(
+  method = "repeatedcv",
+  number = 5,
+  repeats = 10,
+  classProbs = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = "final",
+  sampling = "smote"
+)
+```
+
+```{r no-balancing}
+set.seed(21)
+
+model_no_bal <- train(
+  alt_status ~ .,
+  data = clean_data,
+  method = "glm",
+  family = binomial(),
+  metric = "ROC",
+  trControl = ctrl_none,
+  preProcess = c("center", "scale")
+)
+
+pred_no_bal <- model_no_bal$pred %>%
+  as_tibble() %>%
+  mutate(obs = factor(obs, levels = c("ALT_low", "ALT_high")))
+
+metrics_no_bal <- summarise_cv_metrics(pred_no_bal)
+summary_no_bal <- summarise_mean_sd(metrics_no_bal, "No balancing")
+
+summary_no_bal
+```
+
+```{r class-weighting}
+set.seed(21)
+
+case_weights <- make_class_weights(clean_data$alt_status)
+
+model_weighted <- train(
+  alt_status ~ .,
+  data = clean_data,
+  method = "glm",
+  family = binomial(),
+  weights = case_weights,
+  metric = "ROC",
+  trControl = ctrl_none,
+  preProcess = c("center", "scale")
+)
+
+pred_weighted <- model_weighted$pred %>%
+  as_tibble() %>%
+  mutate(obs = factor(obs, levels = c("ALT_low", "ALT_high")))
+
+metrics_weighted <- summarise_cv_metrics(pred_weighted)
+summary_weighted <- summarise_mean_sd(metrics_weighted, "Class weighting")
+
+summary_weighted
+```
+
+```{r metric-helper}
+get_test_metrics <- function(prob_alt, truth, threshold = 0.5, positive_class = "ALT_high") {
+  
+  negative_class <- setdiff(levels(truth), positive_class)
+  
+  pred <- ifelse(prob_alt > threshold, positive_class, negative_class) %>%
+    factor(levels = levels(truth))
+  
+  cm <- confusionMatrix(pred, truth, positive = positive_class)
+  
+  roc_obj <- pROC::roc(
+    response = truth,
+    predictor = prob_alt,
+    levels = c(negative_class, positive_class),
+    quiet = TRUE
+  )
+  
+  tibble(
+    auc = as.numeric(auc(roc_obj)),
+    sensitivity = unname(cm$byClass["Sensitivity"]),
+    specificity = unname(cm$byClass["Specificity"]),
+    precision = unname(cm$byClass["Pos Pred Value"]),
+    recall = unname(cm$byClass["Recall"]),
+    f1 = unname(cm$byClass["F1"]),
+    balanced_accuracy = unname(cm$byClass["Balanced Accuracy"])
+  )
+}
+```
+
+```{r rose}
+set.seed(21)
+
+rose_data <- ROSE::ROSE(alt_status ~ ., data = clean_data)$data
+
+model_rose <- train(
+  alt_status ~ .,
+  data = rose_data,
+  method = "glm",
+  family = binomial(),
+  metric = "ROC",
+  trControl = ctrl_none,
+  preProcess = c("center", "scale")
+)
+
+pred_rose <- model_rose$pred %>%
+  as_tibble() %>%
+  mutate(obs = factor(obs, levels = c("ALT_low", "ALT_high")))
+
+metrics_rose <- summarise_cv_metrics(pred_rose)
+summary_rose <- summarise_mean_sd(metrics_rose, "ROSE")
+
+summary_rose
+```
+
+```{r smote}
+set.seed(21)
+
+model_smote <- train(
+  alt_status ~ .,
+  data = clean_data,
+  method = "glm",
+  family = binomial(),
+  metric = "ROC",
+  trControl = ctrl_smote,
+  preProcess = c("center", "scale")
+)
+
+pred_smote <- model_smote$pred %>%
+  as_tibble() %>%
+  mutate(obs = factor(obs, levels = c("ALT_low", "ALT_high")))
+
+metrics_smote <- summarise_cv_metrics(pred_smote)
+summary_smote <- summarise_mean_sd(metrics_smote, "SMOTE")
+
+summary_smote
+```
+
+```{r final-comparison}
+final_comparison <- bind_rows(
+  summary_no_bal,
+  summary_weighted,
+  summary_rose,
+  summary_smote
+)
+
+final_comparison
+```

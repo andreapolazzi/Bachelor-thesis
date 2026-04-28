@@ -1,0 +1,83 @@
+---
+title: "14_Boruta_feat_imp"
+date: today
+format:
+  html:
+    toc: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+---
+
+```{r setup}
+library(tidyverse)
+library(Boruta)
+library(randomForest)
+source("../scripts/clean_columns.R")
+data <- readxl::read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+clean_data <- clean_pcawg_data(data)
+clean_data <- clean_data %>%
+  drop_na()
+summary(clean_data)
+```
+
+```{r importance}
+set.seed(21)
+Boruta.primary <- clean_data %>% 
+  select(-c(1,2)) %>% 
+  rename_with(~gsub('_singleton_dist', '', .)) %>% 
+  Boruta(alt_status~., data=., holdHistory = T, ntree=500, doTrace = 1, maxRuns = 200, getImp = getImpExtraZ)
+```
+
+```{r plots}
+plot(Boruta.primary, las=2)
+plotImpHistory(Boruta.primary)
+attStats(Boruta.primary)
+
+Boruta.primary
+TentativeRoughFix(Boruta.primary)
+```
+
+```{r single-run}
+run_boruta_once <- function(data) {
+  
+  train_index <- createDataPartition(data$alt_status, p = 0.7, list = FALSE)
+  train <- data[train_index, ]
+  
+  bor <- Boruta(
+    alt_status ~ .,
+    data = train,
+    ntree = 500,
+    maxRuns = 200,
+    doTrace = 0
+  )
+  
+  stats <- attStats(bor) %>%
+    rownames_to_column("feature") %>%
+    select(feature, decision)
+  
+  return(stats)
+}
+```
+
+```{r}
+n_runs <- 20
+
+boruta_results <- map_dfr(1:n_runs, ~{
+  cat("Run:", .x, "\n")
+  run_boruta_once(clean_data %>% select(-c(1,2)))
+}, .id = "run")
+
+feature_stability <- boruta_results %>%
+  group_by(feature) %>%
+  summarise(
+    confirmed_pct = mean(decision == "Confirmed"),
+    tentative_pct = mean(decision == "Tentative"),
+    rejected_pct = mean(decision == "Rejected")
+  ) %>%
+  arrange(desc(confirmed_pct))
+
+feature_stability
+```

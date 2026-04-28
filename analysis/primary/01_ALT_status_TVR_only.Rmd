@@ -1,0 +1,288 @@
+---
+title: "04_ALT_status"
+author: 'Andrea Polazzi'
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+# Setup
+
+Let's load the dataset and have a look at it.
+
+```{r setup}
+library(readxl)
+data <- read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+summary(data)
+```
+
+We have to rename columns, set categories as factors, deal with NA values, and handle typing.
+
+```{r cleaning-data}
+source('../scripts/clean_columns.R')
+clean_data <- clean_pcawg_data(data)
+summary(clean_data)
+```
+
+# Define the TVR modeling dataset
+
+Before doing PCA or classification, it is useful to **define a single dataset** containing only the response variable and the TVR features of interest. In this way, NA handling is done once, row alignment is preserved, and the same samples are used consistently throughout the analysis.
+
+```{r model-data}
+tvr_cols <- grep("_dist$", names(clean_data), value = TRUE)
+
+model_data <- clean_data[, c("alt_status", tvr_cols)]
+model_data <- model_data[complete.cases(model_data), ]
+
+summary(model_data)
+```
+
+# PCA with TVR motifs
+
+Here we perform PCA using the TVR motif variables only.
+
+```{r PCA}
+X <- scale(model_data[, tvr_cols])
+pca <- prcomp(X, center = TRUE, scale. = TRUE)
+summary(pca)
+
+library(ggplot2)
+
+pca_df <- data.frame(
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2],
+  ALT = model_data$alt_status
+)
+
+ggplot(pca_df, aes(PC1, PC2, color = ALT)) +
+  geom_point(alpha = 0.6) +
+  theme_minimal() +
+  labs(
+    title = "PCA of TVR Singleton Distances",
+    x = "PC1",
+    y = "PC2"
+  )
+
+pca$rotation
+```
+
+## PCA biplot of TVR motifs
+
+We see, using the info stored in the loadings of the PCs, what motifs drive the components variability. 
+
+```{r biplot}
+# sample coordinates
+scores <- data.frame(
+  PC1 = pca$x[,1],
+  PC2 = pca$x[,2],
+  ALT = model_data$alt_status
+)
+
+# motif vectors
+loadings <- data.frame(
+  PC1 = pca$rotation[,1],
+  PC2 = pca$rotation[,2],
+  motif = sapply(strsplit(rownames(pca$rotation), split = '_', fixed = TRUE), `[`, 1)
+)
+
+# scale the loadings (smaller than sample coordinates) to make arrows more visible
+loadings$PC1 <- loadings$PC1 * 10
+loadings$PC2 <- loadings$PC2 * 10
+
+library(ggplot2)
+
+ggplot(scores, aes(PC1, PC2, color = ALT)) +
+  geom_point(alpha = 0.6) +
+  geom_segment(data = loadings,
+               aes(x = 0, y = 0, xend = PC1, yend = PC2),
+               arrow = arrow(length = unit(0.2,"cm")),
+               inherit.aes = FALSE,
+               color = "black") +
+  geom_text(data = loadings,
+            aes(x = PC1, y = PC2, label = motif),
+            inherit.aes = FALSE,
+            size = 3) +
+  theme_minimal() +
+  labs(
+    title = "PCA biplot of TVR motifs",
+    x = "PC1",
+    y = "PC2"
+  )
+```
+
+In the PCA biplot, the vectors corresponding to **TTCGGG** and **TTTGGG** align with the region containing ALT-high/ALT-low tumors, suggesting that variation in these telomere variant repeats contributes to the separation between ALT and non-ALT samples. Interestingly, the motifs driving the separation of the clusters are **those reported in the paper** as enriched or depleted respectively.
+
+# Supervised classification
+
+Now we move on to supervised classification. The goal is to **test whether TVR motifs can predict ALT status**, and then see if adding other features improves performance. Conceptually, we can follow this pipeline:
+
+- 1 split train/test
+- 2 define feature sets
+- 3 train models
+- 4 cross-validate
+- 5 evaluate performance
+- 6 compute feature importance
+
+## Split the dataset
+
+First we randomly split the dataset in **training set** and **test set**, and check that both ALT+ and ALT- are sufficiently represented in the two splits.
+
+```{r train-test}
+set.seed(21)
+train_index <- sample(1:nrow(model_data), size = 0.8 * nrow(model_data))
+train <- model_data[train_index, ]
+test <- model_data[-train_index, ]
+
+table(train$alt_status, dnn = 'train')
+table(test$alt_status, dnn = 'test')
+```
+
+## Define feature set
+
+We extract the TVR features, storing predictors and response in distinct objects.
+
+```{r TVR-features}
+x_train <- train[, tvr_cols]
+x_test <- test[, tvr_cols]
+y_train <- train$alt_status
+y_test <- test$alt_status
+```
+
+## First classifier: logistic regression
+
+We train a first simple logistic regression model.
+
+```{r logistic-regression}
+train_glm <- train
+train_glm$alt_status <- relevel(train_glm$alt_status, ref = "ALT-low")
+test_glm <- test
+test_glm$alt_status <- factor(test_glm$alt_status, levels = levels(train_glm$alt_status))
+
+logreg_model <- glm(
+  alt_status ~ ., 
+  data = train_glm,
+  family = 'binomial'
+)
+
+prob <- predict(logreg_model, newdata = test_glm, type = 'response')
+```
+
+### Evaluate performance
+
+The choice of ROC/AUC instead of simple accuracy is due to the fact that **our dataset is unbalanced**: the sample ratio of ALT-low to ALT-high is approximately 10:1. This means that a naive classifier, for example one assigning ALT-low labels to all observations, would have a good-looking accuracy.
+
+Therefore **accuracy is a simple but misleading metric** in this case. Since our logistic regression model predicts the probability of an observation belonging to the ALT-high class, we can use ROC/AUC to evaluate the performance of the model.
+
+```{r ROC-AUC-logreg}
+library(pROC)
+
+roc_obj <- roc(
+  response = test_glm$alt_status,
+  predictor = prob,
+  levels = c("ALT-low", "ALT-high"),
+  direction = "<"
+)
+
+plot(roc_obj, main = "ROC curve - Logistic regression (TVR only)", xlim = c(1, 0))
+
+auc(roc_obj)
+```
+
+And we can see that the performance of this model is **pretty good** (AUC=0.8636), supporting the idea that **TVR motifs** already contain **useful predictive information**. The steep initial rise of the curve suggests that the model can correctly identify many ALT-high tumors while maintaining a **low false positive rate**.
+
+```{r pred-prob-distribution, warning=FALSE}
+prob_df <- data.frame(
+  prob = prob,
+  alt_status = test_glm$alt_status
+)
+
+library(ggplot2)
+
+ggplot(prob_df, aes(x = prob, fill = alt_status)) +
+  geom_density(alpha = 0.4) +
+  theme_minimal() +
+  labs(
+    title = "Predicted probability distributions",
+    x = "Predicted probability of ALT-high",
+    y = "Density"
+  )
+```
+
+Samples labeled ALT-low are almost entirely concentrated near zero probability of ALT-high, indicating that the model assigns them consistently low ALT probabilities. In contrast, **ALT-high samples display a broader distribution**, with many receiving moderate to high predicted probabilities. This partial separation suggests that the TVR motif features contain meaningful information about ALT status, although some overlap indicates that **not all ALT-high tumors are equally distinguishable** based on these features alone.
+
+### Other metrics
+
+```{r confusion-matrix-logreg}
+pred_class <- ifelse(prob >= 0.5, "ALT-high", "ALT-low")
+pred_class <- factor(pred_class, levels = c("ALT-low", "ALT-high"))
+
+library(caret)
+confusionMatrix(pred_class, test_glm$alt_status, positive = 'ALT-high')
+```
+
+The **confusion matrix** shows that the logistic regression model achieves **high overall accuracy** (96.1%), which is significantly better than the no-information rate (93%), indicating that the model performs meaningfully better than always predicting the majority class. The model exhibits **very high specificity** (99.4%), meaning it almost never misclassifies ALT-low tumors as ALT-high, and a **high precision** (87.5%) for ALT-high predictions, indicating that when the model predicts ALT-high it is usually correct.
+
+However, the **sensitivity is moderate** (~52%), meaning that only about half of the true ALT-high tumors are detected. The resulting **balanced accuracy** of ~76% reflects this asymmetry: the model is very effective at identifying ALT-low samples but less sensitive in detecting all ALT-high cases, suggesting that while TVR motifs provide useful predictive signal, they **do not fully capture the variability of ALT tumors**.
+
+## Second classifier: Random Forest
+
+A random forest can capture nonlinear relationships and interactions between TVR motifs that are not modeled by logistic regression. We therefore fit the same prediction task using RF on the same training and test sets.
+
+```{r RF}
+library(randomForest)
+
+rf_model <- randomForest(
+  alt_status ~ ., 
+  data = train,
+  ntree = 500,
+  importance = TRUE
+)
+
+rf_model
+```
+### Evaluate performance
+```{r ROC-AUC-RF}
+rf_prob <- predict(rf_model, test, type = "prob")[, "ALT-high"]
+
+library(pROC)
+
+roc_rf <- roc(
+  response = test$alt_status,
+  predictor = rf_prob,
+  levels = c("ALT-low", "ALT-high")
+)
+
+plot(
+  roc_rf,
+  main = "ROC curve - Random Forest (TVR motifs)"
+)
+
+auc(roc_rf)
+```
+The Random Forest classifier achieved an **AUC of 0.903**, indicating excellent discrimination between ALT-high and ALT-low tumors using only TVR motif features, and is slightly improved compared with the logistic regression model, suggesting that allowing **nonlinear relationships** between motifs provides **additional predictive power**.
+
+### Other metrics
+
+```{r confusion-matrix-RF}
+rf_pred <- ifelse(rf_prob >= 0.5, "ALT-high", "ALT-low")
+rf_pred <- factor(rf_pred, levels = c("ALT-low", "ALT-high"))
+
+library(caret)
+
+confusionMatrix(
+  rf_pred,
+  test$alt_status,
+  positive = "ALT-high"
+)
+```
+
+**Overall classification accuracy is 96.7%**, significantly higher than the no-information rate (93.1%), confirming that the model captures real signal in the data. Random Forest maintains **very high specificity (0.994)**, meaning ALT-low tumors are almost never misclassified as ALT-high. **Sensitivity improves slightly** compared with logistic regression (0.593 vs ~0.556), indicating that the model detects a somewhat larger fraction of ALT-high tumors. **Precision** for ALT-high predictions **remains high (0.889)**, meaning most tumors predicted as ALT-high are correct. The **balanced accuracy of 0.794** reflects the continued asymmetry caused by class imbalance: the model is extremely strong at identifying ALT-low samples but **still misses some ALT-high tumors**.
+
+
+### Feature importance
+Random Forest's big advantage is that we can perform **feature importance analysis**. With this, we can asses which motifs contribute the most to classification.
+
+```{r feature-importance}
+varImpPlot(rf_model)
+```
+
+TTTGGG_singleton_dist emerges as the most influential predictor, followed by TGAGGG_singleton_dist and TTCGGG_singleton_dist. **This result is consistent with the earlier PCA analysis**, where these motifs also contributed substantially to the main axes of variation, reinforcing the conclusion that specific TVR patterns characterize ALT tumors.

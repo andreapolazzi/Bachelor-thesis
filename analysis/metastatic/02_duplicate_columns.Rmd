@@ -1,0 +1,84 @@
+---
+title: "02_duplicate_columns"
+author: "Andrea Polazzi"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# REMARK ON DUPLICATE COLUMNS
+In the original dataset **some columns seem to be repeated** (cancer_type, cancer_type_code, Mixed_def, Tumor_Telomere fusion rate (Gt-end/coverage*purity), TTGGGG_singletons_norm_by_all_reads_ORDER, CATGGG_singletons_norm_by_all_reads_ORDER). Let's run some checks to see what is going on.
+
+First of all, we must load the dataset:
+```{r setup, message=FALSE, warning=FALSE}
+library(readxl)
+data <- read_xlsx("../data/raw/drivers.xlsx")
+```
+
+We will first check if, for each duplicate column, also the content is duplicated or they actually report different (discordant) info.
+
+```{r check-duplicates}
+dup1 <- c('cancer_type...2', 'cancer_type_code...3', 'Mixed_def...4', 'Tumor_Telomere fusion rate (Gt-end/coverage*purity)...5', 'TTGGGG_singletons_norm_by_all_reads_ORDER...42', 'CATGGG_singletons_norm_by_all_reads_ORDER...50')
+dup2 <- c('cancer_type...28', 'cancer_type_code...29', 'Mixed_def...30', 'Tumor_Telomere fusion rate (Gt-end/coverage*purity)...32', 'TTGGGG_singletons_norm_by_all_reads_ORDER...62', 'CATGGG_singletons_norm_by_all_reads_ORDER...70')
+
+res <- mapply(function(col1, col2) {
+  isTRUE(all.equal(data[[col1]], data[[col2]], tolerance = 1e-8))
+}, dup1, dup2)
+
+res
+```
+
+Interesting results: columns that are labeled as TRUE have matching duplicate values, otherwise FALSE. Let's analyze them one by one:
+
+## Cancer type
+```{r cancer-type}
+unique(data[data$cancer_type...2!=data$cancer_type...28, c('Patient_ID_IF_mod', 'cancer_type...2', 'cancer_type...28', 'primaryTumorLocation')])
+```
+
+Here we see the patients that have a discording cancer type description. The cancer types seem somewhat related in the two columns, but there are some strange exceptions (e.g. Patient_3822). **Should discuss merging**
+
+## Cancer type code
+```{r cancer-type-code}
+unique(data[data$cancer_type_code...3!=data$cancer_type_code...29, c('Patient_ID_IF_mod', 'cancer_type_code...3', 'cancer_type_code...29', 'primaryTumorLocation')])
+```
+
+Accordant to the previous comparison (**same patients**).
+
+## Mixed def
+```{r mixed-def}
+unique(data[data$Mixed_def...4!=data$Mixed_def...30, c('Patient_ID_IF_mod', 'Mixed_def...4', 'Mixed_def...30')])
+```
+
+Again, accordant to previous comparisons but there are **more** and **different entries** in disagreement.
+
+## TF rate
+```{r tf-rate}
+unique(data[
+  abs(data$`Tumor_Telomere fusion rate (Gt-end/coverage*purity)...5` - data$`Tumor_Telomere fusion rate (Gt-end/coverage*purity)...32`) > 1e-8, c('Patient_ID_IF_mod', 'Tumor_Telomere fusion rate (Gt-end/coverage*purity)...5', 'Tumor_Telomere fusion rate (Gt-end/coverage*purity)...32')
+])
+```
+
+No entry is returned, as expected: this is just a **duplicated column**. (CAVEAT: due to floating point differences, we cannot compare with != or abs() > 0. We must allow some microscopic tolerance)
+
+## TTGGGG singletons norm. by all reads ORDER
+```{r TTGGGG all-reads}
+unique(data[data$TTGGGG_singletons_norm_by_all_reads_ORDER...42!=data$TTGGGG_singletons_norm_by_all_reads_ORDER...62, c('Patient_ID_IF_mod', 'TTGGGG_singletons_norm_by_all_reads_ORDER...42', 'TTGGGG_singletons_norm_by_all_reads_ORDER...62')])
+```
+
+Here the behavior is a bit odd: columns have the same name, and should represent something unambiguous and identical (rank by TTGGGG reads normalized over total reads), but **values differ in every patient**. The point here is that the column in the original dataset probably has an error in this column name: it should be 'TTGGGG_singletons_norm_by_**intratel**_ORDER', in agreement with the previous column that reports the singletons norm. by intratel reads. **This column should be renamed**
+
+## CATGGG singletons norm. by all reads ORDER
+```{r CATGGG all-reads}
+unique(data[data$CATGGG_singletons_norm_by_all_reads_ORDER...50!=data$CATGGG_singletons_norm_by_all_reads_ORDER...70, c('Patient_ID_IF_mod', 'CATGGG_singletons_norm_by_all_reads_ORDER...50', 'CATGGG_singletons_norm_by_all_reads_ORDER...70')])
+```
+
+Here we have to be careful: although the columns have the same name and the same values for all patients, there is an **error in the dataset** again. The error is the same as before (first is correct, second should be intratel), but there was no detectable difference in the content because CATGGG reads are 0 in both cases and in every patient. **This column should be renamed**.
+
+
+# Column renaming
+With these consideration being made, we can now rename the columns and remove duplicates or ambiguities.
+```{r column-rename}
+source('../scripts/clean_columns.R')
+tel_data <- clean_telomere_data(data)
+colnames(tel_data)
+```
+

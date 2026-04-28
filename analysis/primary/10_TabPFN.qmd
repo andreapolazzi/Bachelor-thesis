@@ -1,0 +1,307 @@
+---
+title: "13_TabPFN"
+author: "Andrea Polazzi"
+date: today
+format:
+  html:
+    toc: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+---
+
+# Setup
+
+```{r setup}
+library(reticulate, quietly = TRUE)
+use_virtualenv("~/Desktop/CBM/project/analysis/.venv-tabpfn", required = TRUE)
+py_config()
+
+api_token <- Sys.getenv("TABPFN_TOKEN")
+
+library(readxl, quietly = TRUE)
+library(tidyverse, quietly = TRUE)
+library(pROC, quietly = TRUE)
+library(caret, quietly = TRUE)
+
+source("../scripts/clean_columns.R")
+
+cache_file <- "../outputs/tabpfn_cv_results.rds"
+run_tabpfn <- !file.exists(cache_file)
+
+data <- read_xlsx("../data/raw/PCAWG_variables_PCA_woK.xlsx")
+
+clean_data <- clean_pcawg_data(data)
+
+model_data <- clean_data %>%
+  select(-c(1, 2)) %>%
+  filter(complete.cases(.)) %>%
+  mutate(
+    alt_status = factor(
+      alt_status,
+      levels = c("ALT-low", "ALT-high")
+    )
+  )
+
+summary(model_data)
+```
+
+# Data preparation for TabPFN (single split)
+
+```{r split}
+set.seed(21)
+train_index <- sample(seq_len(nrow(model_data)), size = 0.7 * nrow(model_data))
+train <- model_data[train_index, ]
+test  <- model_data[-train_index, ]
+
+# convert in 0/1 encoding, to be sure
+y_train_r <- as.integer(train$alt_status == "ALT-high")
+y_test_r  <- as.integer(test$alt_status  == "ALT-high")
+
+x_train_r <- train %>% select(-alt_status)
+x_test_r  <- test  %>% select(-alt_status)
+
+x_all_r <- model_data %>% select(-alt_status)
+y_all_r  <- as.integer(model_data$alt_status == "ALT-high")
+```
+
+Here we have split the data in training (70%) and test (30%), encoding `alt_status` as 0 (ALT-low) and 1 (ALT-high).
+
+# Training
+
+```{python tabpfn}
+import numpy as np
+import tabpfn_client
+from tabpfn_client import TabPFNClassifier
+
+tabpfn_client.set_access_token(r.api_token)
+
+X_train = r.x_train_r.to_numpy().astype(float)
+X_test  = r.x_test_r.to_numpy().astype(float)
+y_train = np.array(r.y_train_r, dtype=int)
+
+clf = TabPFNClassifier()
+clf.fit(X_train, y_train)
+
+tabpfn_probs = clf.predict_proba(X_test)[:, 1]
+```
+
+# Performance evaluation
+
+We evaluate the performance of the TabPFN classifier with the same metrics used for the other models.
+
+```{r evaluate}
+tabpfn_prob <- py$tabpfn_probs
+y_test <- y_test_r
+
+roc_tabpfn <- roc(
+  response = factor(y_test, levels = c(0, 1), labels = c("ALT-low", "ALT-high")),
+  predictor = tabpfn_prob,
+  levels = c("ALT-low", "ALT-high"),
+  direction = "<"
+)
+
+plot(roc_tabpfn, main = "ROC curve - TabPFN (all features)")
+auc(roc_tabpfn)
+```
+
+```{r confusion-matrix}
+pred_class <- factor(
+  ifelse(tabpfn_prob >= 0.5, "ALT-high", "ALT-low"),
+  levels = c("ALT-low", "ALT-high")
+)
+true_class <- factor(
+  ifelse(y_test == 1, "ALT-high", "ALT-low"),
+  levels = c("ALT-low", "ALT-high")
+)
+
+confusionMatrix(pred_class, true_class, positive = "ALT-high")
+```
+
+These **preliminary results** obtained on a first split of the data are already **promising**: the model achieved an **AUC = 0.9942.**
+
+The confusion matrix, although being calculated on a single split, shows a good behavior, concordant with previous results: a **good, significant accuracy (0.988)**, **perfect specificity (1.000)** and **high sensitivity (0.800)**, that together yield a **good balanced accuracy (0.900)**.
+
+These preliminary results on a single random split are very strong, but they should be interpreted cautiously until confirmed by repeated cross-validation.
+
+# Stratified CV
+
+To have a fair comparison between Log. Reg. and RF models, we have used the same **5-fold stratified CV with 5 repeats**.
+
+Here are reported the results and performance evaluation metrics:
+
+```{r cv-folds}
+set.seed(21)
+
+cv_data <- model_data
+k <- 5
+n_repeats <- 5
+
+cv_splits <- list()
+split_id <- 1
+
+for (r in 1:n_repeats) {
+  fold_id <- integer(nrow(cv_data))
+  
+  idx_low <- which(cv_data$alt_status == "ALT-low")
+  idx_high <- which(cv_data$alt_status == "ALT-high")
+  
+  fold_id[idx_low] <- sample(rep(1:k, length.out = length(idx_low)))
+  fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
+  
+  for (fold in 1:k) {
+    train_idx <- which(fold_id != fold)
+    test_idx <- which(fold_id == fold)
+    
+    cv_splits[[split_id]] <- list(
+      train = train_idx,
+      test = test_idx,
+      rep = r,
+      fold = fold
+    )
+    
+    split_id <- split_id + 1
+  }
+}
+```
+
+```{python tabpfn-cv, eval=run_tabpfn}
+import numpy as np
+from tabpfn_client import TabPFNClassifier
+from sklearn.metrics import roc_auc_score
+
+X_all = r.x_all_r.to_numpy().astype(float)
+y_all = np.array(r.y_all_r, dtype=int)
+
+cv_splits = r.cv_splits
+
+auc_scores = []
+
+per_fold_metrics = []
+
+for split in cv_splits:
+    train_idx = np.array(split["train"], dtype=int) - 1
+    test_idx  = np.array(split["test"],  dtype=int) - 1
+
+    clf = TabPFNClassifier()
+    clf.fit(X_all[train_idx], y_all[train_idx])
+
+    probs     = clf.predict_proba(X_all[test_idx])[:, 1]
+    preds     = (probs >= 0.5).astype(int)
+    true      = y_all[test_idx]
+
+    auc  = roc_auc_score(true, probs)
+    tp   = int(np.sum((preds == 1) & (true == 1)))
+    fp   = int(np.sum((preds == 1) & (true == 0)))
+    tn   = int(np.sum((preds == 0) & (true == 0)))
+    fn   = int(np.sum((preds == 0) & (true == 1)))
+
+    # sensitivity e specificity: NA-safe
+    sens = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
+    spec = tn / (tn + fp) if (tn + fp) > 0 else float("nan")
+
+    per_fold_metrics.append({
+        "auc": auc, "tp": tp, "fp": fp, "tn": tn, "fn": fn,
+        "sensitivity": sens, "specificity": spec
+    })
+```
+
+```{r load-or-save-tabpfn}
+if (file.exists(cache_file)) {
+  results <- readRDS(cache_file)
+  message("Loaded cached TabPFN results")
+} else {
+  results <- list(
+    per_fold_metrics = py$per_fold_metrics %>%
+      bind_rows() %>%
+      mutate(across(everything(), as.numeric)),
+    seed = 21,
+    k = k,
+    n_repeats = n_repeats
+  )
+  saveRDS(results, cache_file)
+  message("Computed TabPFN results and saved")
+}
+
+metrics_df <- results$per_fold_metrics
+```
+
+```{r cv-results}
+cat('=== Previous results for reference ===\nLogistic Regression: ~0.94 ± 0.083\nRandom Forest:       ~0.98 ± 0.012')
+
+agg_tp <- sum(metrics_df$tp)
+agg_fp <- sum(metrics_df$fp)
+agg_tn <- sum(metrics_df$tn)
+agg_fn <- sum(metrics_df$fn)
+
+cat("=== Aggregated confusion matrix (sum over all CV folds) ===\n")
+cm_agg <- matrix(c(agg_tn, agg_fn,
+                   agg_fp, agg_tp),
+                 nrow = 2, byrow = TRUE,
+                 dimnames = list(
+                   Predicted = c("ALT-low", "ALT-high"),
+                   Reference = c("ALT-low", "ALT-high")
+                 ))
+print(cm_agg)
+
+cat("Aggregated sensitivity:", round(agg_tp / (agg_tp + agg_fn), 4), "\nAggregated specificity:", round(agg_tn / (agg_tn + agg_fp), 4), "\nAggregated balanced accuracy:", round(0.5 * (agg_tp/(agg_tp+agg_fn) + agg_tn/(agg_tn+agg_fp)), 4))
+
+cat("=== Per-fold metrics (mean ± SD across 25 folds) ===\n")
+metrics_df %>%
+  summarise(
+    across(c(auc, sensitivity, specificity),
+           list(mean = ~round(mean(.x, na.rm=TRUE), 4),
+                sd   = ~round(sd(.x,   na.rm=TRUE), 4)))
+  ) %>%
+  pivot_longer(everything(),
+               names_to  = c("metric", ".value"),
+               names_sep = "_(?=[^_]+$)") %>%
+  mutate(summary = paste0(mean, " ± ", sd)) %>%
+  select(metric, summary) %>%
+  print()
+```
+
+# Interpretability
+
+```{r export-data, eval=FALSE}
+dir.create("../outputs/shap_input", recursive = TRUE, showWarnings = FALSE)
+
+readr::write_csv(as.data.frame(x_train_r), "../outputs/shap_input/X_train.csv")
+n_shap <- min(20, nrow(x_test_r))
+readr::write_csv(as.data.frame(x_test_r[1:n_shap, , drop = FALSE]),
+                 "../outputs/shap_input/X_test_small.csv")    # we use a smaller test set otherwise it takes too much time
+readr::write_csv(data.frame(y_train = y_train_r), "../outputs/shap_input/y_train.csv")
+```
+
+```{r run-python-script, eval=FALSE}
+cmd <- paste(
+  "source ~/Desktop/CBM/project/analysis/.venv-tabpfn/bin/activate &&",
+  "python ~/Desktop/CBM/project/scripts/run_tabpfn_shap.py"
+)
+
+Sys.setenv(TABPFN_TOKEN = api_token)
+
+system(cmd, intern = FALSE, ignore.stdout = FALSE, ignore.stderr = FALSE)
+```
+
+## SHAP plots
+
+```{r shap-images, out.width='85%'}
+shap_files <- c(
+  "figures/tabpfn_shap1.png",
+  "figures/tabpfn_shap2.png",
+  "figures/tabpfn_shap3.png"
+)
+
+existing_files <- shap_files[file.exists(shap_files)]
+
+if (length(existing_files) == 0) {
+  cat("No SHAP images found in figures/.")
+} else {
+  knitr::include_graphics(existing_files)
+}
+```
+
+TODO: feature ablation, try inference of TERT, try extensions (ensembles, interpretability, RF)
