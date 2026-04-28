@@ -357,7 +357,7 @@ df %>%
   mutate(n_label = paste0(cancer_type, ' (n=', n(), ')')) %>% 
   ungroup() %>% 
   mutate(cancer_type = fct_reorder(cancer_type, abs_error, .fun = median)) %>%
-  ggplot(aes(x = cancer_type, y = abs_error)) +
+  ggplot(aes(x = n_label, y = abs_error)) +
   geom_boxplot(outlier.shape = 21, fill = "steelblue", alpha = 0.6) +
   coord_flip() +
   labs(title = "Absolute error by cancer type (test set)",
