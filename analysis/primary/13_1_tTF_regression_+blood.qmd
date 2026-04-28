@@ -353,6 +353,9 @@ df %>%
   )
 
 df %>%
+  group_by(cancer_type) %>% 
+  mutate(n_label = paste0(cancer_type, ' (n=', n(), ')')) %>% 
+  ungroup() %>% 
   mutate(cancer_type = fct_reorder(cancer_type, abs_error, .fun = median)) %>%
   ggplot(aes(x = cancer_type, y = abs_error)) +
   geom_boxplot(outlier.shape = 21, fill = "steelblue", alpha = 0.6) +
@@ -420,14 +423,20 @@ importance <- bind_rows(
     mutate(
       model_part = "Presence (P(TF>0))",
       abs_coef = abs(estimate),
-      significance = ifelse(p.value < 0.05, "***", "ns")
+      significance = case_when(p.value < 0.001 ~ '***',
+                               p.value < 0.01 ~ '**',
+                               p.value < 0.05 ~ '*',
+                               TRUE ~ 'ns')
     ),
   tidy(m_intensity) %>%
     filter(term != "(Intercept)") %>%
     mutate(
       model_part = "Intensity (E[rate|TF>0])",
       abs_coef = abs(estimate),
-      significance = ifelse(p.value < 0.05, "***", "ns")
+      significance = case_when(p.value < 0.001 ~ '***',
+                               p.value < 0.01 ~ '**',
+                               p.value < 0.05 ~ '*',
+                               TRUE ~ 'ns')
     )
 )
 
@@ -443,7 +452,7 @@ importance %>%
   theme_minimal() +
   labs(
     title = "Feature Importance: TF Presence vs Intensity",
-    subtitle = "*** = p < 0.05",
+    subtitle = "*** = p < 0.001, ** = p < 0.01, * = p < 0.05",
     x = "Feature",
     y = "Coefficient"
   )
