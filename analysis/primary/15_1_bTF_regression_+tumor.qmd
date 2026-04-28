@@ -10,3 +10,458 @@ execute:
   message: false
   freeze: auto
 ---
+
+# Setup
+
+```{r setup}
+library(tidyverse)
+library(glmnet)
+library(here)
+library(randomForest)
+library(caret)
+
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+clean_data <- data %>% 
+  drop_na()
+cancer_type_vector <- clean_data$cancer_type
+```
+
+Since we are in a regression task, it is better to have a distribution for our response variable as symmetric as possible. We know it is currently strongly skewed, thus we can apply a log1p transformation to deal with its asymmetry and its zero values. We can do the same also for similarly distributed features, such as telomere insertion.
+
+We also drop unwanted columns and recode `alt_status` as 0 (ALT-low) and 1 (ALT-high).
+
+```{r log1p-transformation}
+clean_data <- clean_data %>% 
+  mutate(tf_blood_rate = log1p(tf_blood_rate),
+         tf_primary_rate = log1p(tf_primary_rate), 
+         telomere_insertion_rate = log1p(telomere_insertion_rate),
+         alt_status = case_when(
+           alt_status == 'ALT-low' ~ 0,
+           alt_status == 'ALT-high' ~ 1,
+           TRUE ~ NA_real_
+           )
+         ) %>% 
+  select(-donor_id, -cancer_type, -Specimen.Type.Summary)
+```
+
+# Split the dataset
+
+We split the dataset with a 70/30 split in training set and test set. We won't touch the latter until final performance estimation, to avoid data leakage.
+
+```{r train-test}
+set.seed(21)
+train_idx <- sample(nrow(clean_data), 0.7*nrow(clean_data))
+
+train <- clean_data[train_idx,]
+test <- clean_data[-train_idx,]
+```
+
+# Metrics functions
+
+We define functions to help us in the evaluation of the performances of the models. In particular we will use RMSE and R squared.
+
+```{r metrics}
+rmse_fn <- function(actual, predicted) sqrt(mean((actual-predicted)^2))
+r2_fn <- function(actual, predicted) {
+  1-sum((actual-predicted)^2) / sum((actual-mean(actual))^2)
+}
+```
+
+------------------------------------------------------------------------
+
+# Manual Cross-Validation
+
+We use a 5-fold cross-validation on the training set. We do it manually to have to possibility to further extend to other metrics, methods, or whatever.
+
+```{r cv-setup}
+k <- 5
+n_repeats <- 5
+set.seed(21)
+
+cv_results <- tibble(fold = integer(), model = character(), rmse = double(), r2 = double())
+lasso_coef_list <- list()
+rf_importance_list <- list()
+idx <- 1
+```
+
+```{r cv-loop}
+for (rep in 1:n_repeats){
+  set.seed(21 + rep)
+  fold_list <- createFolds(factor(train$alt_status), k = k, returnTrain = FALSE)
+  folds <- integer(nrow(train))
+  for (i in seq_along(fold_list)) folds[fold_list[[i]]] <- i
+  for (i in 1:k){
+    fold_train <- train[folds!=i,]
+    fold_test <- train[folds==i,]
+    
+    # Standardize the predictors
+    cols_to_scale <- setdiff(names(fold_train), c("tf_blood_rate", "alt_status"))
+    preproc <- preProcess(fold_train %>% select(all_of(cols_to_scale)),
+                           method = c("center", "scale"))
+    fold_train_s <- fold_train %>%
+      mutate(predict(preproc, fold_train %>% select(all_of(cols_to_scale))))
+    fold_test_s  <- fold_test %>%
+      mutate(predict(preproc, fold_test %>% select(all_of(cols_to_scale))))
+    
+    # LM
+    fit_lm <- lm(tf_blood_rate ~ ., data = fold_train_s)
+    pred_lm <- predict(fit_lm, newdata = fold_test_s)
+    
+    # LASSO
+    x_fold_train <- model.matrix(tf_blood_rate ~ ., fold_train_s)[,-1]
+    y_fold_train <- fold_train_s$tf_blood_rate
+    x_fold_test <- model.matrix(tf_blood_rate ~ ., fold_test_s)[,-1]
+    
+    cv_l <- cv.glmnet(x_fold_train, y_fold_train, alpha=1, nfolds=5)
+    fit_lasso <- glmnet(x_fold_train, y_fold_train, alpha=1, lambda = cv_l$lambda.min)
+    pred_lasso <- as.vector(predict(fit_lasso, newx = x_fold_test))
+    
+    ## LASSO coefficients for this fold
+    lasso_coef_list[[idx]] <- coef(fit_lasso) %>% 
+      as.matrix() %>% 
+      as.data.frame() %>% 
+      rownames_to_column('feature') %>% 
+      rename(coef = s0) %>% 
+      mutate(rep = rep, fold = i)
+    
+    
+    # Random Forest
+    fit_rf <- randomForest(tf_blood_rate ~ ., data = fold_train, importance = TRUE)
+    pred_rf <- predict(fit_rf, newdata = fold_test)
+    
+    ## Importance of this fold
+    rf_importance_list[[idx]] <- importance(fit_rf) %>% 
+      as.data.frame() %>% 
+      rownames_to_column('feature') %>% 
+      mutate(rep = rep, fold = i)
+    
+    idx <- idx + 1
+    
+    # Metrics
+    cv_results <- cv_results %>% bind_rows(
+      tibble(rep = rep, fold = i, model = 'lm',
+             rmse = rmse_fn(fold_test$tf_blood_rate, pred_lm),
+             r2 = r2_fn(fold_test$tf_blood_rate, pred_lm)),
+      tibble(rep = rep, fold = i, model = 'lasso',
+             rmse = rmse_fn(fold_test$tf_blood_rate, pred_lasso),
+             r2 = r2_fn(fold_test$tf_blood_rate, pred_lasso)),
+      tibble(rep = rep, fold = i, model = 'rf',
+             rmse = rmse_fn(fold_test$tf_blood_rate, pred_rf),
+             r2 = r2_fn(fold_test$tf_blood_rate, pred_rf))
+    )
+  }
+}
+```
+
+------------------------------------------------------------------------
+
+# CV results
+
+Averages and standard deviations on 5 folds.
+
+```{r cv-performance-table}
+cv_summary <- cv_results %>% 
+  group_by(model) %>% 
+  summarise(
+    rmse_mean = mean(rmse), rmse_sd = sd(rmse),
+    r2_mean = mean(r2), r2_sd = sd(r2),
+    .groups = 'drop'
+  ) %>% 
+  arrange(rmse_mean)
+
+cv_summary
+```
+
+```{r cv-performance-plot}
+cv_results |>
+  pivot_longer(c(rmse, r2), names_to = "metric", values_to = "value") |>
+  mutate(model = fct_reorder(model, value, .fun = mean)) |>
+  ggplot(aes(x = model, y = value, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = 21) +
+  facet_wrap(~metric, scales = "free_y",
+             labeller = labeller(metric = c(rmse = "RMSE", r2 = "R²"))) +
+  labs(title = "Metrics distribution per fold (5-fold)",
+       x = NULL, y = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+## Feature importance : LASSO
+
+For each feature we register in how many folds is has been selected from Lasso and the mean/SD of the coefficient. A feature selected in all folds with a stable coefficient should be a strong enough signal. Otherwise, rarely selected features or unstable coefficients must be interpreted carefully.
+
+```{r lasso-stability}
+lasso_stability <- bind_rows(lasso_coef_list) %>% 
+  filter(feature != '(Intercept)') %>% 
+  group_by(feature) %>% 
+  summarise(
+    n_selected = sum(coef != 0),
+    freq = n_selected / (n_repeats*k),
+    coef_mean = mean(coef[coef != 0]),
+    coef_sd = sd(coef[coef != 0]),
+    .groups = 'drop'
+  ) %>% 
+  arrange(desc(freq), desc(abs(coef_mean)))
+lasso_stability
+```
+
+```{r lasso-stability-plot}
+plt_lasso_coef <- lasso_stability %>% 
+                    filter(n_selected > 0) %>% 
+                    mutate(feature = fct_reorder(feature, abs(coef_mean))) %>% 
+                    ggplot(aes(x = coef_mean, y = feature, fill = freq))+
+                    geom_col(alpha = 0.8)+
+                    geom_errorbarh(aes(xmin = coef_mean - coef_sd,
+                                       xmax = coef_mean + coef_sd),
+                                   width = 0.25, color = 'grey30')+
+                    scale_fill_gradient(low = 'grey90', high = 'steelblue')+
+                    geom_vline(xintercept = 0, linetype = 'dashed', color = 'grey50')+
+                    labs(title = 'LASSO coefficients aggregated on 5 folds',
+                         subtitle = 'Mean ± SD',
+                         x = 'Mean coefficient', y = NULL)+
+                    theme_bw()
+plt_lasso_coef
+```
+
+## Feature importance: Random Forest
+
+```{r rf-importance}
+rf_importance_summary <- bind_rows(rf_importance_list) %>% 
+  group_by(feature) %>% 
+  summarise(
+    inc_mse_mean = mean(`%IncMSE`),
+    inc_mse_sd = sd(`%IncMSE`),
+    .groups = 'drop'
+    ) %>% 
+  arrange(desc(inc_mse_mean))
+rf_importance_summary
+```
+
+```{r rf-importance-plot}
+plt_rf_importance <- rf_importance_summary %>% 
+                        mutate(feature = fct_reorder(feature, inc_mse_mean)) %>% 
+                        ggplot(aes(x = inc_mse_mean, y = feature))+
+                        geom_col(fill='seagreen', alpha = 0.8) +
+                        geom_errorbarh(aes(xmin = inc_mse_mean - inc_mse_sd,
+                                           xmax = inc_mse_mean + inc_mse_sd),
+                                       width = 0.3, color = 'grey30')+
+                        labs(title = 'RF importance aggregated on 5 folds (%IncMSE)',
+                             subtitle = 'Mean ± SD',
+                             x = 'Mean %IncMSE', y = NULL) +
+                        theme_bw()
+plt_rf_importance
+```
+
+## Comparison LASSO vs RF: do they agree?
+
+```{r convergence-plot}
+lasso_norm <- lasso_stability |>
+  filter(n_selected > 0) |>
+  mutate(score_lasso = abs(coef_mean) / max(abs(coef_mean))) |>
+  select(feature, score_lasso, freq_lasso = freq)
+
+rf_norm <- rf_importance_summary |>
+  mutate(score_rf = inc_mse_mean / max(inc_mse_mean)) |>
+  select(feature, score_rf)
+
+convergence <- full_join(lasso_norm, rf_norm, by = "feature") |>
+  replace_na(list(score_lasso = 0, score_rf = 0, freq_lasso = 0))
+
+convergence |>
+  mutate(feature = fct_reorder(feature, score_lasso + score_rf)) |>
+  pivot_longer(c(score_lasso, score_rf), names_to = "method", values_to = "score") |>
+  mutate(method = recode(method,
+                         score_lasso = "LASSO |coef| norm.",
+                         score_rf    = "RF %IncMSE norm.")) |>
+  ggplot(aes(x = score, y = feature, fill = method)) +
+  geom_col(position = position_dodge(width = 0.7), alpha = 0.85, width = 0.6) +
+  scale_fill_manual(values = c("LASSO |coef| norm." = "#1a6fb5",
+                                "RF %IncMSE norm."   = "#2e7d5e")) +
+  labs(title = "Signal convergence: LASSO vs Random Forest",
+       subtitle = "Normalized scores (0–1) for direct comparison",
+       x = "Normalized score", y = NULL, fill = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "bottom")
+```
+
+# Final evaluation on test set
+
+Let's fit each model on the whole training set and evaluate on the test set.
+
+```{r final-lm}
+final_lm   <- lm(tf_blood_rate ~ ., data = train)
+pred_lm_f  <- predict(final_lm, newdata = test)
+```
+
+```{r final-lasso}
+x_train_f  <- model.matrix(tf_blood_rate ~ ., train)[, -1]
+y_train_f  <- train$tf_blood_rate
+x_test_f   <- model.matrix(tf_blood_rate ~ ., test)[,  -1]
+
+set.seed(21)
+cv_lasso_f    <- cv.glmnet(x_train_f, y_train_f, alpha = 1)
+final_lasso   <- glmnet(x_train_f, y_train_f, alpha = 1,
+                        lambda = cv_lasso_f$lambda.min)
+pred_lasso_f  <- as.vector(predict(final_lasso, newx = x_test_f))
+```
+
+```{r final-rf}
+set.seed(21)
+final_rf  <- randomForest(tf_blood_rate ~ ., data = train, importance = TRUE)
+pred_rf_f <- predict(final_rf, newdata = test)
+```
+
+```{r final-results}
+tibble(
+  model = c("LM", "LASSO", "Random Forest"),
+  rmse  = c(rmse_fn(test$tf_blood_rate, pred_lm_f),
+            rmse_fn(test$tf_blood_rate, pred_lasso_f),
+            rmse_fn(test$tf_blood_rate, pred_rf_f)),
+  r2    = c(r2_fn(test$tf_blood_rate, pred_lm_f),
+            r2_fn(test$tf_blood_rate, pred_lasso_f),
+            r2_fn(test$tf_blood_rate, pred_rf_f))
+) |>
+  arrange(rmse)
+```
+
+## Quantification of the residuals
+
+Beware that these results are in log1p scale!
+
+```{r quantification-error}
+df <- tibble(
+  true = test$tf_blood_rate,
+  pred = pred_rf_f,
+  error = pred - true,
+  abs_error = abs(error),
+  perc_error = paste0(round(error/true, digits = 3) * 100,'%'),
+  cancer_type = cancer_type_vector[-train_idx]
+)
+print(df, n=50)
+
+df %>%
+  summarise(
+    mean_error = mean(error),
+    sd_error = sd(error),
+    mae = mean(abs_error),
+    median_ae = median(abs_error),
+    max_ae = max(abs_error),
+    rmse = sqrt(mean(error^2))
+  )
+
+df %>%
+  group_by(cancer_type) %>% 
+  mutate(n_label = paste0(cancer_type, ' (n=', n(), ')')) %>% 
+  ungroup() %>% 
+  mutate(n_label = fct_reorder(n_label, abs_error, .fun = median)) %>%
+  ggplot(aes(x = n_label, y = abs_error)) +
+  geom_boxplot(outlier.shape = 21, fill = "steelblue", alpha = 0.6) +
+  coord_flip() +
+  labs(title = "Absolute error by cancer type (test set)",
+       x = NULL, y = "Absolute error (log1p scale)") +
+  theme_bw()
+```
+
+# Two-part model
+
+```{r two-model}
+library(broom)
+cols_to_scale <- setdiff(names(train), c('tf_blood_rate', 'alt_status'))
+
+preproc_final <- preProcess(train %>% select(all_of(cols_to_scale)),
+                            method = c('center', 'scale'))
+
+train_s <- train %>% 
+  mutate(predict(preproc_final, train %>% select(all_of(cols_to_scale))))
+
+test_s <- test %>% 
+  mutate(predict(preproc_final, test %>% select(all_of(cols_to_scale))))
+
+# PARTE 1: Chi ha fusione telomerica? (logistica)
+m_presence <- glm(
+  I(tf_blood_rate > 0) ~ .,
+  family = binomial(link = "logit"),
+  data = train_s
+)
+
+# PARTE 2: Quando c'è fusione, quanto forte? (GLM su positivi)
+df_positive <- train_s %>% filter(tf_blood_rate > 0)
+
+m_intensity <- glm(
+  tf_blood_rate ~ .,
+  family = Gamma(link = "log"),
+  data = df_positive
+)
+
+summary(m_presence)
+summary(m_intensity)
+```
+
+```{r plots}
+# Plot residui modello 1 (logistica)
+par(mfrow = c(2, 2))
+plot(m_presence)
+par(mfrow = c(1, 1))
+
+# Plot residui modello 2 (gamma sui positivi)
+par(mfrow = c(2, 2))
+plot(m_intensity)
+par(mfrow = c(1, 1))
+```
+
+```{r importance-two-models}
+library(dplyr)
+library(ggplot2)
+
+# Combina i coefficienti dalle due parti
+importance <- bind_rows(
+  tidy(m_presence) %>%
+    filter(term != "(Intercept)") %>%
+    mutate(
+      model_part = "Presence (P(TF>0))",
+      abs_coef = abs(estimate),
+      significance = case_when(p.value < 0.001 ~ '***',
+                               p.value < 0.01 ~ '**',
+                               p.value < 0.05 ~ '*',
+                               TRUE ~ 'ns')
+    ),
+  tidy(m_intensity) %>%
+    filter(term != "(Intercept)") %>%
+    mutate(
+      model_part = "Intensity (E[rate|TF>0])",
+      abs_coef = abs(estimate),
+      significance = case_when(p.value < 0.001 ~ '***',
+                               p.value < 0.01 ~ '**',
+                               p.value < 0.05 ~ '*',
+                               TRUE ~ 'ns')
+    )
+)
+
+# Visualizza
+importance %>%
+  ggplot(aes(x = reorder(term, abs_coef), y = estimate, fill = model_part)) +
+  geom_col(position = "dodge") +
+  geom_text(aes(label = significance), 
+            position = position_dodge(width = 0.9), 
+            vjust = -0.5, hjust = 0.5) +
+  facet_wrap(~model_part, scales = "free_x") +
+  coord_flip() +
+  theme_minimal() +
+  labs(
+    title = "Feature Importance: TF Presence vs Intensity",
+    subtitle = "*** = p < 0.001, ** = p < 0.01, * = p < 0.05",
+    x = "Feature",
+    y = "Coefficient"
+  )
+
+# Ranking complessivo (quale feature è più importante in generale?)
+overall_importance <- importance %>%
+  group_by(term) %>%
+  summarise(
+    avg_abs_coef = mean(abs_coef),
+    n_sig = sum(p.value < 0.05)
+  ) %>%
+  arrange(desc(avg_abs_coef))
+
+print(overall_importance)
+```

@@ -33,7 +33,6 @@ We also drop unwanted columns and recode `alt_status` as 0 (ALT-low) and 1 (ALT-
 ```{r log1p-transformation}
 clean_data <- clean_data %>% 
   mutate(tf_blood_rate = log1p(tf_blood_rate),
-         tf_primary_rate = log1p(tf_primary_rate), 
          telomere_insertion_rate = log1p(telomere_insertion_rate),
          alt_status = case_when(
            alt_status == 'ALT-low' ~ 0,
@@ -41,7 +40,7 @@ clean_data <- clean_data %>%
            TRUE ~ NA_real_
            )
          ) %>% 
-  select(-donor_id, -cancer_type, -Specimen.Type.Summary)
+  select(-donor_id, -cancer_type, -Specimen.Type.Summary, -tf_primary_rate)
 ```
 
 # Split the dataset
