@@ -36,6 +36,15 @@ summary(model_data_full)
 
 Now we don't have NA values anymore, but we should be aware of the fact that we are dealing with a **much smaller dataset** (1943 before, 817 now) and some cancer types are underrepresented or totally absent.
 
+# Define the larger dataset
+
+We also keep a dataframe with all observation, thus **dropping the TERT_FPKM column**.
+
+```{r model-data-large}
+model_data_large <- clean_data %>% select(-TERT_FPKM) %>% drop_na()
+```
+
+
 # Correlation matrix
 
 ```{r corr-matrix}
@@ -119,7 +128,6 @@ ggplot(scores, aes(PC1, PC2, color = ALT)) +
             size = 3.5,
             ) +
   theme_bw() +
-  coord_equal() +
   labs(
     title = "PCA biplot of all features",
     x = "PC1",
@@ -127,6 +135,80 @@ ggplot(scores, aes(PC1, PC2, color = ALT)) +
   )
 ggsave("../../outputs/PCA_biplot_all.pdf", width = 7, height = 6)
 ```
+
+# PCA without TERT (more patients)
+
+```{r pca-no-tert}
+X2 <- scale(model_data_large[, -c(1,2,3)])
+pca2 <- prcomp(X2, center = TRUE, scale. = TRUE)
+summary(pca2)
+
+library(ggplot2)
+
+pca_df2 <- data.frame(
+  PC1 = pca2$x[,1],
+  PC2 = pca2$x[,2],
+  ALT = model_data_large$alt_status
+)
+
+ggplot(pca_df2, aes(PC1, PC2, color = ALT)) +
+  geom_point(alpha = 0.6) +
+  theme_minimal() +
+  labs(
+    title = "PCA without TERT - more patients (1943)",
+    x = "PC1",
+    y = "PC2"
+  )
+
+pca2$rotation
+```
+
+## Biplot
+
+```{r biplot-no-tert}
+# sample coordinates
+scores2 <- data.frame(
+  PC1 = pca2$x[,1],
+  PC2 = pca2$x[,2],
+  ALT = model_data_large$alt_status
+)
+
+# motif vectors
+loadings2 <- data.frame(
+  PC1 = pca2$rotation[,1],
+  PC2 = pca2$rotation[,2],
+  comp_names = c(rownames(pca2$rotation)[1:3], sapply(strsplit(rownames(pca2$rotation)[4:12], split = '_', fixed = TRUE), `[`, 1))
+)
+
+# scale the loadings (smaller than sample coordinates) to make arrows more visible
+loadings2$PC1 <- loadings2$PC1 * 10
+loadings2$PC2 <- loadings2$PC2 * 10
+
+library(ggplot2)
+library(ggrepel)
+
+ggplot(scores2, aes(PC1, PC2, color = ALT)) +
+  geom_point(alpha = 0.7, size = 2) +
+  geom_segment(data = loadings2,
+               aes(x = 0, y = 0, xend = PC1, yend = PC2),
+               arrow = arrow(length = unit(0.25,"cm")),
+               inherit.aes = FALSE,
+               color = "black") +
+  geom_text_repel(data = loadings2,
+            aes(x = PC1, y = PC2, label = comp_names),
+            inherit.aes = FALSE,
+            size = 3.5,
+            ) +
+  theme_bw() +
+  labs(
+    title = "PCA without TERT - more patients (1943)",
+    x = "PC1",
+    y = "PC2"
+  )
+
+ggsave("../../outputs/PCA_biplot_no_TERT.pdf", width = 7, height = 6)
+```
+
 
 # UMAP plot
 
