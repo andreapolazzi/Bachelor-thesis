@@ -11,6 +11,8 @@ execute:
   freeze: auto
 ---
 
+**Repeating the same pipeline fo the previous document, adding blood TF rate.**
+
 # Setup
 
 ```{r setup}
