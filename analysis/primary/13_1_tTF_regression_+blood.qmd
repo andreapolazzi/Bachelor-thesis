@@ -37,6 +37,7 @@ We also drop unwanted columns and recode `alt_status` as 0 (ALT-low) and 1 (ALT-
 clean_data <- clean_data %>% 
   mutate(tf_primary_rate = log1p(tf_primary_rate), 
          tf_blood_rate = log1p(tf_blood_rate),
+         TERT_FPKM = log1p(TERT_FPKM),
          telomere_insertion_rate = log1p(telomere_insertion_rate),
          alt_status = case_when(
            alt_status == 'ALT-low' ~ 0,
@@ -255,38 +256,6 @@ plt_rf_importance <- rf_importance_summary %>%
 plt_rf_importance
 ```
 
-## Comparison LASSO vs RF: do they agree?
-
-```{r convergence-plot}
-lasso_norm <- lasso_stability |>
-  filter(n_selected > 0) |>
-  mutate(score_lasso = abs(coef_mean) / max(abs(coef_mean))) |>
-  select(feature, score_lasso, freq_lasso = freq)
-
-rf_norm <- rf_importance_summary |>
-  mutate(score_rf = inc_mse_mean / max(inc_mse_mean)) |>
-  select(feature, score_rf)
-
-convergence <- full_join(lasso_norm, rf_norm, by = "feature") |>
-  replace_na(list(score_lasso = 0, score_rf = 0, freq_lasso = 0))
-
-convergence |>
-  mutate(feature = fct_reorder(feature, score_lasso + score_rf)) |>
-  pivot_longer(c(score_lasso, score_rf), names_to = "method", values_to = "score") |>
-  mutate(method = recode(method,
-                         score_lasso = "LASSO |coef| norm.",
-                         score_rf    = "RF %IncMSE norm.")) |>
-  ggplot(aes(x = score, y = feature, fill = method)) +
-  geom_col(position = position_dodge(width = 0.7), alpha = 0.85, width = 0.6) +
-  scale_fill_manual(values = c("LASSO |coef| norm." = "#1a6fb5",
-                                "RF %IncMSE norm."   = "#2e7d5e")) +
-  labs(title = "Signal convergence: LASSO vs Random Forest",
-       subtitle = "Normalized scores (0–1) for direct comparison",
-       x = "Normalized score", y = NULL, fill = NULL) +
-  theme_minimal(base_size = 13) +
-  theme(legend.position = "bottom")
-```
-
 # Final evaluation on test set
 
 Let's fit each model on the whole training set and evaluate on the test set.
@@ -457,14 +426,4 @@ importance %>%
     y = "Coefficient"
   )
 
-# Ranking complessivo (quale feature è più importante in generale?)
-overall_importance <- importance %>%
-  group_by(term) %>%
-  summarise(
-    avg_abs_coef = mean(abs_coef),
-    n_sig = sum(p.value < 0.05)
-  ) %>%
-  arrange(desc(avg_abs_coef))
-
-print(overall_importance)
 ```
