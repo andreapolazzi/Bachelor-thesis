@@ -4,3 +4,4 @@
 .Ruserdata
 data/
 analysis/.venv-tabpfn/
+*_files/*
