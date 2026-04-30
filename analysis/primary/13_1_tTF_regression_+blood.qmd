@@ -29,6 +29,8 @@ cancer_type_vector <- clean_data$cancer_type
 summary(clean_data)
 ```
 
+## Transformations
+
 Since we are in a regression task, it is better to have a distribution for our response variable as symmetric as possible. We know it is currently strongly skewed, thus we can apply a log1p transformation to deal with its asymmetry and its zero values. We can do the same also for similarly distributed features, such as telomere insertion.
 
 We also drop unwanted columns and recode `alt_status` as 0 (ALT-low) and 1 (ALT-high).
