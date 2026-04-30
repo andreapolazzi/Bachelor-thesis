@@ -19,13 +19,12 @@ library(glmnet)
 library(here)
 library(randomForest)
 library(caret)
-source(here('scripts', 'clean_columns.R'))
 
-data <- readxl::read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
-clean_data <- clean_pcawg_data(data)
-clean_data <- clean_data %>% 
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+clean_data <- data %>% 
   drop_na()
 cancer_type_vector <- clean_data$cancer_type
+summary(clean_data)
 ```
 
 Since we are in a regression task, it is better to have a distribution for our response variable as symmetric as possible. We know it is currently strongly skewed, thus we can apply a log1p transformation to deal with its asymmetry and its zero values. We can do the same also for similarly distributed features, such as telomere insertion.
@@ -34,17 +33,16 @@ We also drop unwanted columns and recode `alt_status` as 0 (ALT-low) and 1 (ALT-
 
 ```{r log1p-transformation}
 clean_data <- clean_data %>% 
-  mutate(tf_rate = log1p(tf_rate), 
-         telomere_insertion_rate = log1p(telomere_insertion_rate),
-         TERT_FPKM = log1p(TERT_FPKM),
-         alt_status = case_when(
-           alt_status == 'ALT-low' ~ 0,
-           alt_status == 'ALT-high' ~ 1,
-           TRUE ~ NA_real_
-           )
-         ) %>% 
-  relocate(alt_status, .after = tf_rate) %>% 
-  select(-donor_id, -cancer_type)
+  mutate(
+    tf_primary_rate = log1p(tf_primary_rate), 
+    telomere_insertion_rate = log1p(telomere_insertion_rate),
+    TERT_FPKM = log1p(TERT_FPKM),
+    alt_status = factor(
+      alt_status,
+      levels = c("ALT-low", "ALT-high")
+    )
+  ) %>%  
+  select(-donor_id, -cancer_type, -Specimen.Type.Summary, -tf_blood_rate)
 ```
 
 # Split the dataset
@@ -53,7 +51,7 @@ We split the dataset with a 70/30 split in training set and test set. We won't t
 
 ```{r train-test}
 set.seed(21)
-train_idx <- sample(nrow(clean_data), 0.7*nrow(clean_data))
+train_idx <- sample(nrow(clean_data), 0.8*nrow(clean_data))
 
 train <- clean_data[train_idx,]
 test <- clean_data[-train_idx,]
@@ -98,7 +96,7 @@ for (rep in 1:n_repeats){
     fold_test <- train[folds==i,]
     
     # Standardize the predictors
-    cols_to_scale <- setdiff(names(fold_train), c("tf_rate", "alt_status"))
+    cols_to_scale <- setdiff(names(fold_train), c("tf_primary_rate", "alt_status"))
     preproc <- preProcess(fold_train %>% select(all_of(cols_to_scale)),
                            method = c("center", "scale"))
     fold_train_s <- fold_train %>%
@@ -107,13 +105,13 @@ for (rep in 1:n_repeats){
       mutate(predict(preproc, fold_test %>% select(all_of(cols_to_scale))))
     
     # LM
-    fit_lm <- lm(tf_rate ~ ., data = fold_train_s)
+    fit_lm <- lm(tf_primary_rate ~ ., data = fold_train_s)
     pred_lm <- predict(fit_lm, newdata = fold_test_s)
     
     # LASSO
-    x_fold_train <- model.matrix(tf_rate ~ ., fold_train_s)[,-1]
-    y_fold_train <- fold_train_s$tf_rate
-    x_fold_test <- model.matrix(tf_rate ~ ., fold_test_s)[,-1]
+    x_fold_train <- model.matrix(tf_primary_rate ~ ., fold_train_s)[,-1]
+    y_fold_train <- fold_train_s$tf_primary_rate
+    x_fold_test <- model.matrix(tf_primary_rate ~ ., fold_test_s)[,-1]
     
     cv_l <- cv.glmnet(x_fold_train, y_fold_train, alpha=1, nfolds=5)
     fit_lasso <- glmnet(x_fold_train, y_fold_train, alpha=1, lambda = cv_l$lambda.min)
@@ -129,7 +127,7 @@ for (rep in 1:n_repeats){
     
     
     # Random Forest
-    fit_rf <- randomForest(tf_rate ~ ., data = fold_train, importance = TRUE)
+    fit_rf <- randomForest(tf_primary_rate ~ ., data = fold_train, importance = TRUE)
     pred_rf <- predict(fit_rf, newdata = fold_test)
     
     ## Importance of this fold
@@ -143,14 +141,14 @@ for (rep in 1:n_repeats){
     # Metrics
     cv_results <- cv_results %>% bind_rows(
       tibble(rep = rep, fold = i, model = 'lm',
-             rmse = rmse_fn(fold_test$tf_rate, pred_lm),
-             r2 = r2_fn(fold_test$tf_rate, pred_lm)),
+             rmse = rmse_fn(fold_test$tf_primary_rate, pred_lm),
+             r2 = r2_fn(fold_test$tf_primary_rate, pred_lm)),
       tibble(rep = rep, fold = i, model = 'lasso',
-             rmse = rmse_fn(fold_test$tf_rate, pred_lasso),
-             r2 = r2_fn(fold_test$tf_rate, pred_lasso)),
+             rmse = rmse_fn(fold_test$tf_primary_rate, pred_lasso),
+             r2 = r2_fn(fold_test$tf_primary_rate, pred_lasso)),
       tibble(rep = rep, fold = i, model = 'rf',
-             rmse = rmse_fn(fold_test$tf_rate, pred_rf),
-             r2 = r2_fn(fold_test$tf_rate, pred_rf))
+             rmse = rmse_fn(fold_test$tf_primary_rate, pred_rf),
+             r2 = r2_fn(fold_test$tf_primary_rate, pred_rf))
     )
   }
 }
@@ -260,14 +258,14 @@ plt_rf_importance
 Let's fit each model on the whole training set and evaluate on the test set.
 
 ```{r final-lm}
-final_lm   <- lm(tf_rate ~ ., data = train)
+final_lm   <- lm(tf_primary_rate ~ ., data = train)
 pred_lm_f  <- predict(final_lm, newdata = test)
 ```
 
 ```{r final-lasso}
-x_train_f  <- model.matrix(tf_rate ~ ., train)[, -1]
-y_train_f  <- train$tf_rate
-x_test_f   <- model.matrix(tf_rate ~ ., test)[,  -1]
+x_train_f  <- model.matrix(tf_primary_rate ~ ., train)[, -1]
+y_train_f  <- train$tf_primary_rate
+x_test_f   <- model.matrix(tf_primary_rate ~ ., test)[,  -1]
 
 set.seed(21)
 cv_lasso_f    <- cv.glmnet(x_train_f, y_train_f, alpha = 1)
@@ -278,20 +276,20 @@ pred_lasso_f  <- as.vector(predict(final_lasso, newx = x_test_f))
 
 ```{r final-rf}
 set.seed(21)
-final_rf  <- randomForest(tf_rate ~ ., data = train, importance = TRUE)
+final_rf  <- randomForest(tf_primary_rate ~ ., data = train, importance = TRUE)
 pred_rf_f <- predict(final_rf, newdata = test)
 ```
 
 ```{r final-results}
 tibble(
   model = c("LM", "LASSO", "Random Forest"),
-  rmse  = c(rmse_fn(test$tf_rate, pred_lm_f),
-            rmse_fn(test$tf_rate, pred_lasso_f),
-            rmse_fn(test$tf_rate, pred_rf_f)),
-  r2    = c(r2_fn(test$tf_rate, pred_lm_f),
-            r2_fn(test$tf_rate, pred_lasso_f),
-            r2_fn(test$tf_rate, pred_rf_f))
-) |>
+  rmse  = c(rmse_fn(test$tf_primary_rate, pred_lm_f),
+            rmse_fn(test$tf_primary_rate, pred_lasso_f),
+            rmse_fn(test$tf_primary_rate, pred_rf_f)),
+  r2    = c(r2_fn(test$tf_primary_rate, pred_lm_f),
+            r2_fn(test$tf_primary_rate, pred_lasso_f),
+            r2_fn(test$tf_primary_rate, pred_rf_f))
+) %>% 
   arrange(rmse)
 ```
 
@@ -301,7 +299,7 @@ Beware that these results are in log1p scale!
 
 ```{r quantification-error}
 df <- tibble(
-  true = test$tf_rate,
+  true = test$tf_primary_rate,
   pred = pred_rf_f,
   error = pred - true,
   abs_error = abs(error),
@@ -337,92 +335,132 @@ df %>%
 
 ```{r two-model}
 library(broom)
-cols_to_scale <- setdiff(names(train), c('tf_rate', 'alt_status'))
+k <- 5
+n_repeats <- 5
+presence_coef_list <- list()
+intensity_coef_list <- list()
+idx <- 1
 
-preproc_final <- preProcess(train %>% select(all_of(cols_to_scale)),
-                            method = c('center', 'scale'))
+for(rep in 1:n_repeats){
+  set.seed(21 + rep)
+  fold_list <- createFolds(
+    factor(train$alt_status),
+    k = k,
+    returnTrain = FALSE
+  )
+  folds <- integer(nrow(train))
 
-train_s <- train %>% 
-  mutate(predict(preproc_final, train %>% select(all_of(cols_to_scale))))
-
-test_s <- test %>% 
-  mutate(predict(preproc_final, test %>% select(all_of(cols_to_scale))))
-
-# PARTE 1: Chi ha fusione telomerica? (logistica)
-m_presence <- glm(
-  I(tf_rate > 0) ~ .,
-  family = binomial(link = "logit"),
-  data = train_s
-)
-
-# PARTE 2: Quando c'è fusione, quanto forte? (GLM su positivi)
-df_positive <- train_s %>% filter(tf_rate > 0)
-
-m_intensity <- glm(
-  tf_rate ~ .,
-  family = Gamma(link = "log"),
-  data = df_positive
-)
-
-summary(m_presence)
-summary(m_intensity)
-```
-
-```{r plots}
-# Plot residui modello 1 (logistica)
-par(mfrow = c(2, 2))
-plot(m_presence)
-par(mfrow = c(1, 1))
-
-# Plot residui modello 2 (gamma sui positivi)
-par(mfrow = c(2, 2))
-plot(m_intensity)
-par(mfrow = c(1, 1))
+  for(i in seq_along(fold_list)){
+    folds[fold_list[[i]]] <- i
+  }
+  
+  for(i in 1:k){
+    fold_train <- train[folds != i, ]
+    cols_to_scale <- setdiff(
+      names(fold_train),
+      c("tf_primary_rate", "alt_status")
+    )
+    preproc <- preProcess(
+      fold_train %>% select(all_of(cols_to_scale)),
+      method = c("center", "scale")
+    )
+    fold_train_s <- fold_train %>%
+      mutate(
+        predict(
+          preproc,
+          fold_train %>% select(all_of(cols_to_scale))
+        )
+      )
+    # PART 1: Presence
+    m_presence_cv <- glm(
+      I(tf_primary_rate > 0) ~ .,
+      family = binomial(link = "logit"),
+      data = fold_train_s
+    )
+    presence_coef_list[[idx]] <- tidy(m_presence_cv) %>%
+      filter(term != "(Intercept)") %>%
+      mutate(
+        rep = rep,
+        fold = i
+      )
+    # PART 2: Intensity
+    df_positive_cv <- fold_train_s %>%
+      filter(tf_primary_rate > 0)
+    m_intensity_cv <- glm(
+      tf_primary_rate ~ .,
+      family = Gamma(link = "log"),
+      data = df_positive_cv
+    )
+    intensity_coef_list[[idx]] <- tidy(m_intensity_cv) %>%
+      filter(term != "(Intercept)") %>%
+      mutate(
+        rep = rep,
+        fold = i
+      )
+    idx <- idx + 1
+  }
+}
 ```
 
 ```{r importance-two-models}
-library(dplyr)
-library(ggplot2)
-
-# Combina i coefficienti dalle due parti
-importance <- bind_rows(
-  tidy(m_presence) %>%
-    filter(term != "(Intercept)") %>%
-    mutate(
-      model_part = "Presence (P(TF>0))",
-      abs_coef = abs(estimate),
-      significance = case_when(p.value < 0.001 ~ '***',
-                               p.value < 0.01 ~ '**',
-                               p.value < 0.05 ~ '*',
-                               TRUE ~ 'ns')
-    ),
-  tidy(m_intensity) %>%
-    filter(term != "(Intercept)") %>%
-    mutate(
-      model_part = "Intensity (E[rate|TF>0])",
-      abs_coef = abs(estimate),
-      significance = case_when(p.value < 0.001 ~ '***',
-                               p.value < 0.01 ~ '**',
-                               p.value < 0.05 ~ '*',
-                               TRUE ~ 'ns')
+importance_cv <- bind_rows(
+  bind_rows(presence_coef_list) %>%
+    mutate(model_part = "Presence (P(TF>0))"),
+  bind_rows(intensity_coef_list) %>%
+    mutate(model_part = "Intensity (E[TF|TF>0])")
+) %>%
+  group_by(model_part, term) %>%
+  summarise(
+    coef_mean = mean(estimate),
+    coef_sd = sd(estimate),
+    p_median = median(p.value, na.rm = TRUE),
+    freq_p05 = mean(p.value < 0.05, na.rm = TRUE),
+    sign_stability =
+      mean(sign(estimate) == sign(mean(estimate))),
+    .groups = "drop"
+  ) %>%
+  mutate(
+    significance = case_when(
+      freq_p05 >= 0.9 ~ "***",
+      freq_p05 >= 0.7 ~ "**",
+      freq_p05 >= 0.5 ~ "*",
+      TRUE ~ "ns"
     )
-)
-
-# Visualizza
-importance %>%
-  ggplot(aes(x = reorder(term, abs_coef), y = estimate, fill = model_part)) +
-  geom_col(position = "dodge") +
-  geom_text(aes(label = significance), 
-            position = position_dodge(width = 0.9), 
-            vjust = -0.5, hjust = 0.5) +
-  facet_wrap(~model_part, scales = "free_x") +
-  coord_flip() +
-  theme_minimal() +
-  labs(
-    title = "Feature Importance: TF Presence vs Intensity",
-    subtitle = "*** = p < 0.001, ** = p < 0.01, * = p < 0.05",
-    x = "Feature",
-    y = "Coefficient"
   )
 
+importance_cv %>%
+  mutate(term = fct_reorder(term, abs(coef_mean))) %>%
+  ggplot(aes(x = coef_mean,
+             y = term,
+             fill = model_part)) +
+  geom_col(alpha = 0.8) +
+  geom_errorbarh(
+    aes(
+      xmin = coef_mean - coef_sd,
+      xmax = coef_mean + coef_sd
+    ),
+    height = 0.2,
+    color = "grey30"
+  ) +
+  geom_text(
+    aes(label = significance),
+    hjust = -0.3,
+    vjust = -0.5,
+    size = 3
+  ) +
+  geom_vline(
+    xintercept = 0,
+    linetype = "dashed",
+    color = "grey50"
+  ) +
+  facet_wrap(~model_part, scales = "free_y") +
+  theme_minimal() +
+  labs(
+    title = "Two-part model coefficient stability across CV folds",
+    subtitle =
+      "***: significant in ≥90% folds; **: ≥70%; *: ≥50%",
+    x = "Mean coefficient across CV folds",
+    y = NULL
+  ) + 
+  theme(legend.position = "none")
 ```
