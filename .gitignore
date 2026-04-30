@@ -2,7 +2,10 @@
 .Rhistory
 .RData
 .Ruserdata
+
 data/
 analysis/.venv-tabpfn/
-*_files/*
+
+*_files
+*_cache
 *.html
