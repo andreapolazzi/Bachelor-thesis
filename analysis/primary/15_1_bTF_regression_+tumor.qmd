@@ -32,8 +32,6 @@ cancer_type_vector <- clean_data$cancer_type
 
 Since we are in a regression task, it is better to have a distribution for our response variable as symmetric as possible. We know it is currently strongly skewed, thus we apply a \`log1p\` transformation to \`tf_blood_rate\`, \`tf_primary_rate\`, \`TERT_FPKM\`, and \`telomere_insertion_rate\` to deal with their asymmetry and zero-inflation.
 
-We also drop unwanted columns and recode \`alt_status\` as 0 (ALT-low) and 1 (ALT-high).
-
 ```{r log1p-transformation}
 clean_data <- clean_data %>% 
   mutate(
