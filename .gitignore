@@ -5,3 +5,4 @@
 data/
 analysis/.venv-tabpfn/
 *_files/*
+*.html
