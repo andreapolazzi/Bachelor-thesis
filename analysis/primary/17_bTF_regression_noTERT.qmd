@@ -23,7 +23,8 @@ library(caret)
 data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 clean_data <- data %>% 
   select(-TERT_FPKM, -donor_id, -Specimen.Type.Summary) %>% 
-  drop_na()
+  drop_na() %>% 
+  filter(tf_primary_rate<10)
 cancer_type_vector <- clean_data$cancer_type
 clean_data <- clean_data %>% select(-cancer_type)
 summary(clean_data)
@@ -32,6 +33,16 @@ summary(clean_data)
 Since we are in a regression task, it is better to have a distribution for our response variable as symmetric as possible. We know it is currently strongly skewed, thus we can apply a log1p transformation to deal with its asymmetry and its zero values. We can do the same also for similarly distributed features, such as telomere insertion.
 
 ```{r log1p-transformation}
+clean_data_orig <- clean_data %>% 
+  mutate(
+    tf_primary_rate = log1p(tf_primary_rate),
+    telomere_insertion_rate = log1p(telomere_insertion_rate),
+    alt_status = factor(
+      alt_status,
+      levels = c("ALT-low", "ALT-high")
+    )
+  )
+
 clean_data <- clean_data %>% 
   mutate(
     tf_primary_rate = log1p(tf_primary_rate),
@@ -54,6 +65,9 @@ train_idx <- sample(nrow(clean_data), 0.8*nrow(clean_data))
 
 train <- clean_data[train_idx,]
 test <- clean_data[-train_idx,]
+
+train_orig <- clean_data_orig[train_idx,]
+test_orig <- clean_data_orig[-train_idx,]
 ```
 
 # Metrics functions
@@ -287,7 +301,12 @@ tibble(
             rmse_fn(test$tf_blood_rate, pred_rf_f)),
   r2    = c(r2_fn(test$tf_blood_rate, pred_lm_f),
             r2_fn(test$tf_blood_rate, pred_lasso_f),
-            r2_fn(test$tf_blood_rate, pred_rf_f))
+            r2_fn(test$tf_blood_rate, pred_rf_f)),
+  Spearman = c(
+    cor(test$tf_blood_rate, pred_lm_f,    method = "spearman"),
+    cor(test$tf_blood_rate, pred_lasso_f, method = "spearman"),
+    cor(test$tf_blood_rate, pred_rf_f,    method = "spearman")
+  )
 ) |>
   arrange(rmse)
 ```
@@ -462,4 +481,76 @@ importance_cv %>%
     y = NULL
   ) + 
   theme(legend.position = "none")
+```
+
+## Regression on test set
+
+Here we do regression using the two-part model. We preprocess the training and test set with a standardization and, to have fair comparisons with other models, we apply a smearing correction to expm1 re-transformation.
+
+```{r two-part model regression}
+# Preprocessing on training set
+cols_to_scale_orig <- setdiff(names(train_orig), c("tf_blood_rate", "alt_status"))
+
+preproc_orig <- preProcess(
+  train_orig %>% select(all_of(cols_to_scale_orig)),
+  method = c("center", "scale")
+)
+
+train_orig_s <- train_orig %>%
+  mutate(predict(preproc_orig, train_orig %>% select(all_of(cols_to_scale_orig))))
+
+test_orig_s <- test_orig %>%
+  mutate(predict(preproc_orig, test_orig %>% select(all_of(cols_to_scale_orig))))
+
+# Fit final models on the whole training set
+m_presence_final <- glm(
+  I(tf_blood_rate > 0) ~ .,
+  family = binomial(link = "logit"),
+  data = train_orig_s
+)
+
+m_intensity_final <- glm(
+  tf_blood_rate ~ .,
+  family = Gamma(link = "log"),
+  data = train_orig_s %>% filter(tf_blood_rate > 0),
+  control = glm.control(maxit = 200)
+)
+
+# Prediction on test set
+pred_presence  <- predict(m_presence_final, newdata = test_orig_s, type = "response")
+pred_intensity <- predict(m_intensity_final, newdata = test_orig_s, type = "response")
+pred_combined  <- pred_presence * pred_intensity    # formula of the two-part model
+
+true_orig <- test_orig$tf_blood_rate
+
+# Correction of log1p retransformation of LM/LASSO/RF (smearing)
+smear_lm    <- mean(exp(residuals(final_lm)))
+smear_lasso <- mean(exp(y_train_f - as.vector(predict(final_lasso, newx = x_train_f))))
+smear_rf    <- mean(exp(train$tf_blood_rate - predict(final_rf)))
+
+pred_lm_orig    <- expm1(pred_lm_f)    * smear_lm
+pred_lasso_orig <- expm1(pred_lasso_f) * smear_lasso
+pred_rf_orig    <- expm1(pred_rf_f)    * smear_rf
+
+tibble(
+  model = c("LM", "LASSO", "Random Forest", "Two-part"),
+  RMSE = c(
+    rmse_fn(true_orig, pred_lm_orig),
+    rmse_fn(true_orig, pred_lasso_orig),
+    rmse_fn(true_orig, pred_rf_orig),
+    rmse_fn(true_orig, pred_combined)
+  ),
+  MAE = c(
+    mean(abs(true_orig - pred_lm_orig)),
+    mean(abs(true_orig - pred_lasso_orig)),
+    mean(abs(true_orig - pred_rf_orig)),
+    mean(abs(true_orig - pred_combined))
+  ),
+  Spearman = c(
+    cor(true_orig, pred_lm_orig,    method = "spearman"),
+    cor(true_orig, pred_lasso_orig, method = "spearman"),
+    cor(true_orig, pred_rf_orig,    method = "spearman"),
+    cor(true_orig, pred_combined,   method = "spearman")
+  )
+) %>% arrange(RMSE)
 ```
