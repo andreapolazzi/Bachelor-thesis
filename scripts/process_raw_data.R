@@ -350,3 +350,27 @@ data_no_red_na <- data_no_red %>%
 
 write_xlsx(data_no_red_na, here('data','processed','metastatic_reduced.xlsx'))
 # Data has been reordered manually afterwards
+
+
+
+# Metastatic intrachromosomal reads TH2
+met_red_edit <- readxl::read_xlsx(here('data', 'processed', 'metastatic_reduced_edited.xlsx'))
+th2_results <- read.csv(here('data','raw','telomerehunter2_r3.results','telomerehunter2_r3.summaries.tsv'), sep = '\t')
+code_conv_df <- readRDS(here('data', 'processed', 'drivers_telins.rds'))
+
+met_red_edit_pat_code <- met_red_edit %>% 
+  left_join(code_conv_df %>% select(patient_id, patient_code), by = 'patient_id') %>% 
+  relocate(patient_code, .after = patient_id)
+
+intrachrom_df <- th2_results %>% 
+  filter(sample == 'tumor') %>% 
+  mutate(patient_code = str_remove(PID, "-.*$")) %>% 
+  mutate(intrachrom_reads_total_reads = intrachromosomal_reads/total_reads)
+  
+met_intrachrom <- met_red_edit_pat_code %>% 
+  left_join(intrachrom_df %>% select(patient_code, intrachrom_reads_total_reads), by = 'patient_code') %>% 
+  relocate(intrachrom_reads_total_reads, .before = intratel_reads_total_reads) %>% 
+  select(-patient_code)
+
+library(writexl)
+write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edited_telins.xlsx'))
