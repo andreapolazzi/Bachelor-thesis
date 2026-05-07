@@ -19,18 +19,20 @@ library(glmnet)
 library(here)
 library(randomForest)
 library(caret)
+library(pROC)
 
 data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
-clean_data <- data %>% 
-  select(-TERT_FPKM, -donor_id, -Specimen.Type.Summary) %>% 
-  drop_na() %>% 
+clean_data <- data %>%
+  select(-TERT_FPKM, -donor_id, -Specimen.Type.Summary) %>%
+  drop_na() %>%
   filter(tf_primary_rate<10)
 cancer_type_vector <- clean_data$cancer_type
 clean_data <- clean_data %>% select(-cancer_type)
-summary(clean_data)
 ```
 
 Since we are in a regression task, it is better to have a distribution for our response variable as symmetric as possible. We know it is currently strongly skewed, thus we can apply a log1p transformation to deal with its asymmetry and its zero values. We can do the same also for similarly distributed features, such as telomere insertion.
+
+The log1p transformation reduces the influence of the outliers for linear models, but it doesn't alter much the zero-inflated structure of the distribution.
 
 ```{r log1p-transformation}
 clean_data_orig <- clean_data %>% 
@@ -338,7 +340,7 @@ df %>%
   group_by(cancer_type) %>% 
   mutate(n_label = paste0(cancer_type, ' (n=', n(), ')')) %>% 
   ungroup() %>% 
-  mutate(cancer_type = fct_reorder(cancer_type, abs_error, .fun = median)) %>%
+  mutate(n_label = fct_reorder(cancer_type, abs_error, .fun = median)) %>%
   ggplot(aes(x = n_label, y = abs_error)) +
   geom_boxplot(outlier.shape = 21, fill = "steelblue", alpha = 0.6) +
   coord_flip() +
@@ -355,6 +357,7 @@ k <- 5
 n_repeats <- 5
 presence_coef_list <- list()
 intensity_coef_list <- list()
+presence_results <- tibble()
 idx <- 1
 
 for(rep in 1:n_repeats){
@@ -372,6 +375,7 @@ for(rep in 1:n_repeats){
   
   for(i in 1:k){
     fold_train <- train[folds != i, ]
+    fold_test <- train[folds == i,]
     cols_to_scale <- setdiff(
       names(fold_train),
       c("tf_primary_rate", "alt_status")
@@ -392,13 +396,37 @@ for(rep in 1:n_repeats){
       I(tf_primary_rate > 0) ~ .,
       family = binomial(link = "logit"),
       data = fold_train_s
-    )
+      )
+    # store coefficients
     presence_coef_list[[idx]] <- tidy(m_presence_cv) %>%
       filter(term != "(Intercept)") %>%
       mutate(
         rep = rep,
         fold = i
       )
+    # predict on standardized predictors of test fold
+    fold_test_s <- fold_test %>%
+      mutate(
+        predict(
+          preproc,
+          fold_test %>% select(all_of(cols_to_scale))
+          )
+        )
+    pred_presence_cv <- predict(
+      m_presence_cv,
+      newdata = fold_test_s,
+      type = "response"
+      )
+    presence_results <- bind_rows(
+      presence_results,
+      tibble(
+        rep = rep,
+        fold = i,
+        truth = as.numeric(fold_test_s$tf_primary_rate > 0),
+        prob = pred_presence_cv
+        )
+      )
+    
     # PART 2: Intensity
     df_positive_cv <- fold_train_s %>%
       filter(tf_primary_rate > 0)
@@ -406,7 +434,7 @@ for(rep in 1:n_repeats){
       tf_primary_rate ~ .,
       family = Gamma(link = "log"),
       data = df_positive_cv
-    )
+      )
     intensity_coef_list[[idx]] <- tidy(m_intensity_cv) %>%
       filter(term != "(Intercept)") %>%
       mutate(
@@ -416,6 +444,30 @@ for(rep in 1:n_repeats){
     idx <- idx + 1
   }
 }
+
+# AUC of presence model
+presence_auc <- presence_results %>%
+  group_by(rep, fold) %>%
+  summarise(
+    auc = as.numeric(pROC::roc(truth, prob, quiet = TRUE)$auc),
+    .groups = "drop"
+  )
+presence_auc %>%
+  summarise(
+    mean_auc = mean(auc, na.rm = TRUE),
+    sd_auc = sd(auc, na.rm = TRUE)
+  )
+presence_auc %>%
+  ggplot(aes(x = "Presence model", y = auc)) +
+  geom_boxplot(fill = "steelblue", alpha = 0.7, width = 0.4) +
+  geom_jitter(width = 0.08, alpha = 0.6) +
+  labs(
+    title = "Presence model performance across CV folds",
+    subtitle = "Logistic part of the two-part model",
+    x = NULL,
+    y = "ROC AUC"
+  ) +
+  theme_bw()
 ```
 
 ```{r importance-two-models}
@@ -483,7 +535,7 @@ importance_cv %>%
 
 ## Regression on test set
 
-Here we do regression using the two-part model. We preprocess the training and test set with a standardization and, to have fair comparisons with other models, we apply a smearing correction to expm1 re-transformation.
+Here we do regression using the two-part model. We preprocess the training and test set with a standardization and, to have fair comparisons with other models, we apply the Duan smearing correction to expm1 re-transformation.
 
 ```{r two-part model regression}
 # Preprocessing on training set
@@ -517,6 +569,14 @@ m_intensity_final <- glm(
 pred_presence  <- predict(m_presence_final, newdata = test_orig_s, type = "response")
 pred_intensity <- predict(m_intensity_final, newdata = test_orig_s, type = "response")
 pred_combined  <- pred_presence * pred_intensity    # formula of the two-part model
+
+# Confusion matrix
+pred_class <- if_else(pred_presence > 0.5, 1, 0)
+confusionMatrix(
+  factor(pred_class),
+  factor(as.numeric(test_orig_s$tf_primary_rate > 0)),
+  positive = "1"
+)
 
 true_orig <- test_orig$tf_primary_rate
 
