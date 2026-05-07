@@ -576,6 +576,14 @@ pred_presence  <- predict(m_presence_final, newdata = test_orig_s, type = "respo
 pred_intensity <- predict(m_intensity_final, newdata = test_orig_s, type = "response")
 pred_combined  <- pred_presence * pred_intensity    # formula of the two-part model
 
+# Confusion matrix
+pred_class <- if_else(pred_presence > 0.5, 1, 0)
+confusionMatrix(
+  factor(pred_class),
+  factor(as.numeric(test_orig_s$tf_primary_rate > 0)),
+  positive = "1"
+)
+
 true_orig <- test_orig$tf_primary_rate
 
 # Correction of log1p retransformation of LM/LASSO/RF (smearing)
