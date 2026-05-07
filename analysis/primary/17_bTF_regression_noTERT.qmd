@@ -20,6 +20,7 @@ library(here)
 library(randomForest)
 library(caret)
 library(pROC)
+library(broom)
 
 data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 clean_data <- data %>%
@@ -29,6 +30,8 @@ clean_data <- data %>%
 cancer_type_vector <- clean_data$cancer_type
 clean_data <- clean_data %>% select(-cancer_type)
 ```
+
+## Transformations
 
 Since we are in a regression task, it is better to have a distribution for our response variable as symmetric as possible. We know it is currently strongly skewed, thus we can apply a log1p transformation to deal with its asymmetry and its zero values. We can do the same also for similarly distributed features, such as telomere insertion.
 
@@ -340,7 +343,7 @@ df %>%
   group_by(cancer_type) %>% 
   mutate(n_label = paste0(cancer_type, ' (n=', n(), ')')) %>% 
   ungroup() %>% 
-  mutate(cancer_type = fct_reorder(cancer_type, abs_error, .fun = median)) %>%
+  mutate(cancer_type = fct_reorder(n_label, abs_error, .fun = median)) %>%
   ggplot(aes(x = n_label, y = abs_error)) +
   geom_boxplot(outlier.shape = 21, fill = "steelblue", alpha = 0.6) +
   coord_flip() +
@@ -352,7 +355,6 @@ df %>%
 # Two-part model
 
 ```{r two-model}
-library(broom)
 k <- 5
 n_repeats <- 5
 presence_coef_list <- list()
@@ -547,14 +549,6 @@ pred_presence  <- predict(m_presence_final, newdata = test_orig_s, type = "respo
 pred_intensity <- predict(m_intensity_final, newdata = test_orig_s, type = "response")
 pred_combined  <- pred_presence * pred_intensity    # formula of the two-part model
 
-# Confusion matrix
-pred_class <- if_else(pred_presence > 0.5, 1, 0)
-confusionMatrix(
-  factor(pred_class),
-  factor(as.numeric(test_orig_s$tf_blood_rate > 0)),
-  positive = "1"
-)
-
 true_orig <- test_orig$tf_blood_rate
 
 # Correction of log1p retransformation of LM/LASSO/RF (smearing)
@@ -615,6 +609,15 @@ presence_auc %>%
     y = "ROC AUC"
   ) +
   theme_bw()
+
+
+# Confusion matrix
+pred_class <- if_else(pred_presence > 0.5, 1, 0)
+confusionMatrix(
+  factor(pred_class),
+  factor(as.numeric(test_orig_s$tf_blood_rate > 0)),
+  positive = "1"
+)
 ```
 
 ## How is the INTENSITY model performing?
