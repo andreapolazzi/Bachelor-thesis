@@ -442,6 +442,11 @@ for(rep in 1:n_repeats){
   }
 }
 
+```
+
+## How is the PRESENCE model performing?
+
+```{r presence-model-auc}
 # AUC of presence model
 presence_auc <- presence_results %>%
   group_by(rep, fold) %>%
@@ -466,6 +471,42 @@ presence_auc %>%
   ) +
   theme_bw()
 ```
+
+## How is the INTENSITY model performing?
+
+```{r intensity-model-performance}
+test_pos_idx <- test_orig_s$tf_blood_rate > 0
+
+cat("Intensity component (evaluated on true positives only, n =",
+    sum(test_pos_idx), ")\n")
+cat("MAE:     ", round(mae_fn(true_orig[test_pos_idx],
+                               pred_intensity[test_pos_idx]), 4), "\n")
+cat("RMSE:    ", round(rmse_fn(true_orig[test_pos_idx],
+                                pred_intensity[test_pos_idx]), 4), "\n")
+cat("Spearman:", round(cor(true_orig[test_pos_idx],
+                            pred_intensity[test_pos_idx],
+                            method = "spearman"), 4), "\n")
+
+tibble(
+  true = true_orig[test_pos_idx],
+  pred = pred_intensity[test_pos_idx]
+) %>%
+  ggplot(aes(x = true, y = pred)) +
+  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_abline(slope = 1, intercept = 0,
+              linetype = "dashed", color = "grey40") +
+  coord_equal() +
+  labs(
+    title = "Intensity component: predicted vs observed",
+    subtitle = paste0("True positives only (n = ", sum(test_pos_idx),
+                      ") — original scale"),
+    x = "Observed tf_blood_rate",
+    y = "Predicted (Gamma GLM)"
+  ) +
+  theme_bw()
+```
+
+## Importance of the two models
 
 ```{r importance-two-models}
 importance_cv <- bind_rows(
