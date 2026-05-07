@@ -86,9 +86,7 @@ We define functions to help us in the evaluation of the performances of the mode
 
 ```{r metrics}
 rmse_fn <- function(actual, predicted) sqrt(mean((actual-predicted)^2))
-r2_fn <- function(actual, predicted) {
-  1-sum((actual-predicted)^2) / sum((actual-mean(actual))^2)
-}
+mae_fn  <- function(actual, predicted) mean(abs(actual - predicted))
 ```
 
 ------------------------------------------------------------------------
@@ -102,7 +100,7 @@ k <- 5
 n_repeats <- 5
 set.seed(21)
 
-cv_results <- tibble(fold = integer(), model = character(), rmse = double(), r2 = double())
+cv_results <- tibble(fold = integer(), model = character(), rmse = double(), mae = double())
 lasso_coef_list <- list()
 rf_importance_list <- list()
 idx <- 1
@@ -165,13 +163,13 @@ for (rep in 1:n_repeats){
     cv_results <- cv_results %>% bind_rows(
       tibble(rep = rep, fold = i, model = 'lm',
              rmse = rmse_fn(fold_test$tf_primary_rate, pred_lm),
-             r2 = r2_fn(fold_test$tf_primary_rate, pred_lm)),
+             mae = mae_fn(fold_test$tf_primary_rate, pred_lm)),
       tibble(rep = rep, fold = i, model = 'lasso',
              rmse = rmse_fn(fold_test$tf_primary_rate, pred_lasso),
-             r2 = r2_fn(fold_test$tf_primary_rate, pred_lasso)),
+             mae = mae_fn(fold_test$tf_primary_rate, pred_lasso)),
       tibble(rep = rep, fold = i, model = 'rf',
              rmse = rmse_fn(fold_test$tf_primary_rate, pred_rf),
-             r2 = r2_fn(fold_test$tf_primary_rate, pred_rf))
+             mae = mae_fn(fold_test$tf_primary_rate, pred_rf))
     )
   }
 }
@@ -186,7 +184,7 @@ cv_summary <- cv_results %>%
   group_by(model) %>% 
   summarise(
     rmse_mean = mean(rmse), rmse_sd = sd(rmse),
-    r2_mean = mean(r2), r2_sd = sd(r2),
+    mae_mean = mean(mae), mae_sd = sd(mae),
     .groups = 'drop'
   ) %>% 
   arrange(rmse_mean)
@@ -196,12 +194,12 @@ cv_summary
 
 ```{r cv-performance-plot}
 cv_results |>
-  pivot_longer(c(rmse, r2), names_to = "metric", values_to = "value") |>
+  pivot_longer(c(rmse, mae), names_to = "metric", values_to = "value") |>
   mutate(model = fct_reorder(model, value, .fun = mean)) |>
   ggplot(aes(x = model, y = value, fill = model)) +
   geom_boxplot(alpha = 0.7, outlier.shape = 21) +
   facet_wrap(~metric, scales = "free_y",
-             labeller = labeller(metric = c(rmse = "RMSE", r2 = "R²"))) +
+             labeller = labeller(metric = c(rmse = "RMSE", mae = "MAE"))) +
   labs(title = "Metrics distribution per fold (5-fold)",
        x = NULL, y = NULL) +
   theme_minimal(base_size = 13) +
@@ -307,9 +305,9 @@ tibble(
   rmse  = c(rmse_fn(test$tf_primary_rate, pred_lm_f),
             rmse_fn(test$tf_primary_rate, pred_lasso_f),
             rmse_fn(test$tf_primary_rate, pred_rf_f)),
-  r2    = c(r2_fn(test$tf_primary_rate, pred_lm_f),
-            r2_fn(test$tf_primary_rate, pred_lasso_f),
-            r2_fn(test$tf_primary_rate, pred_rf_f)),
+  mae   = c(mae_fn(test$tf_primary_rate, pred_lm_f),
+            mae_fn(test$tf_primary_rate, pred_lasso_f),
+            mae_fn(test$tf_primary_rate, pred_rf_f)),
   Spearman = c(
     cor(test$tf_primary_rate, pred_lm_f,    method = "spearman"),
     cor(test$tf_primary_rate, pred_lasso_f, method = "spearman"),
