@@ -11,7 +11,8 @@ In the original dataset **some columns seem to be repeated** (cancer_type, cance
 First of all, we must load the dataset:
 ```{r setup, message=FALSE, warning=FALSE}
 library(readxl)
-data <- read_xlsx("../data/raw/drivers.xlsx")
+library(here)
+data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 ```
 
 We will first check if, for each duplicate column, also the content is duplicated or they actually report different (discordant) info.
@@ -77,7 +78,7 @@ Here we have to be careful: although the columns have the same name and the same
 # Column renaming
 With these consideration being made, we can now rename the columns and remove duplicates or ambiguities.
 ```{r column-rename}
-source('../scripts/clean_columns.R')
+source(here('scripts', 'clean_columns.R'))
 tel_data <- clean_telomere_data(data)
 colnames(tel_data)
 ```

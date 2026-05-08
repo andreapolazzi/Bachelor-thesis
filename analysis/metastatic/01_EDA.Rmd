@@ -12,7 +12,8 @@ First of all, we must load the dataset and the required packages:
 ```{r setup, message=FALSE, warning=FALSE}
 library(readxl)
 library(ggplot2)
-data <- read_xlsx("../data/raw/drivers.xlsx")
+library(here)
+data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 ```
 
 When reading an Excel file, the function `read_xlsx` often refactors columns names adding "..." and a number corresponding to the column index. This is done to avoid ambiguity. Let's rename the columns of `data`
@@ -357,8 +358,8 @@ And we can see that we didn't achieve much more. TVR motif composition seems to 
 # Correlation matrix among all features
 ```{r}
 library(corrplot)
-source('../scripts/clean_columns.R')
-data <- read_xlsx("../data/raw/drivers.xlsx")
+source(here('scripts', 'clean_columns.R'))
+data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 clean_data <- clean_drivers_data(data)
 
 corr_data <- clean_data %>% 

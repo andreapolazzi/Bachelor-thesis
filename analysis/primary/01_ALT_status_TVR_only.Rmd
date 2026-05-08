@@ -11,14 +11,15 @@ Let's load the dataset and have a look at it.
 
 ```{r setup}
 library(readxl)
-data <- read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+library(here)
+data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 summary(data)
 ```
 
 We have to rename columns, set categories as factors, deal with NA values, and handle typing.
 
 ```{r cleaning-data}
-source('../scripts/clean_columns.R')
+source(here('scripts', 'clean_columns.R'))
 clean_data <- clean_pcawg_data(data)
 summary(clean_data)
 ```

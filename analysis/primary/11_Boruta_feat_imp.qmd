@@ -15,8 +15,9 @@ execute:
 library(tidyverse)
 library(Boruta)
 library(randomForest)
-source("../scripts/clean_columns.R")
-data <- readxl::read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+library(here)
+source(here('scripts', 'clean_columns.R'))
+data <- readxl::read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 clean_data <- clean_pcawg_data(data)
 clean_data <- clean_data %>%
   drop_na()

@@ -13,14 +13,15 @@ Let's load the dataset and have a look at it.
 library(tidyverse)
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 library(readxl, quietly = TRUE)
-data <- read_xlsx('../../data/raw/PCAWG_variables_PCA_woK.xlsx')
+library(here)
+data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 summary(data)
 ```
 
 We have to rename columns, set categories as factors, deal with NA values, and handle typing.
 
 ```{r cleaning-data}
-source('../../scripts/clean_columns.R')
+source(here('scripts', 'clean_columns.R'))
 clean_data <- clean_pcawg_data(data)
 summary(clean_data)
 ```
@@ -133,7 +134,7 @@ ggplot(scores, aes(PC1, PC2, color = ALT)) +
     x = "PC1",
     y = "PC2"
   )
-ggsave("../../outputs/PCA_biplot_all.pdf", width = 7, height = 6)
+ggsave(here('outputs', 'PCA_biplot_all.pdf'), width = 7, height = 6)
 ```
 
 # PCA without TERT (more patients)
@@ -206,7 +207,7 @@ ggplot(scores2, aes(PC1, PC2, color = ALT)) +
     y = "PC2"
   )
 
-ggsave("../../outputs/PCA_biplot_no_TERT.pdf", width = 7, height = 6)
+ggsave(here('outputs', 'PCA_biplot_no_TERT.pdf'), width = 7, height = 6)
 ```
 
 

@@ -13,13 +13,14 @@ First of all, we must load the dataset and the required packages:
 ```{r setup, message=FALSE, warning=FALSE}
 library(readxl)
 library(ggplot2)
-data <- read_xlsx("../data/raw/drivers.xlsx")
+library(here)
+data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 ```
 
 And rename/remove duplicate columns, along with awkwardly named ones:
 
 ```{r renaming}
-source('../scripts/clean_columns.R')
+source(here('scripts', 'clean_columns.R'))
 clean_data <- clean_drivers_data(data)
 ```
 

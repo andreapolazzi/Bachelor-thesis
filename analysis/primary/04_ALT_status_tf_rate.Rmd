@@ -9,8 +9,9 @@ output: html_document
 
 ```{r load&clean}
 library(readxl)
-source('../scripts/clean_columns.R')
-data <- read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+library(here)
+source(here('scripts', 'clean_columns.R'))
+data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 clean_data <- clean_pcawg_data(data)
 model_data_reduced <- clean_data[complete.cases(clean_data), -c(1,2,4)]  # we remove also tf_rate
 summary(model_data_reduced)
@@ -89,7 +90,7 @@ p <- ggplot(scores, aes(PC1, PC2, color = ALT)) +
 
 plot(p)
 
-ggsave("../outputs/PCA_biplot_red_tf.pdf", plot = p, width = 7, height = 6)
+ggsave(here('outputs', 'PCA_biplot_red_tf.pdf'), plot = p, width = 7, height = 6)
 ```
 
 

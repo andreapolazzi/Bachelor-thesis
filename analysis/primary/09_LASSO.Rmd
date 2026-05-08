@@ -12,10 +12,11 @@ library(readxl)
 library(tidyverse)
 library(pROC)
 library(glmnet)
+library(here)
 
-source('../scripts/clean_columns.R')
+source(here('scripts', 'clean_columns.R'))
 
-data <- read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 clean_data <- clean_pcawg_data(data)
 
 # Complete cases only, drop sample ID columns
