@@ -15,9 +15,10 @@ library(tidyverse)
 library(ggplot2)
 library(caret)
 library(dplyr)
-source('../scripts/clean_columns.R')
+library(here)
+source(here('scripts', 'clean_columns.R'))
 
-data <- read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 clean_data <- clean_pcawg_data(data)
 model_data <- clean_data[complete.cases(clean_data), -c(1,2)]
 model_data$alt_status <- factor(model_data$alt_status, levels=c("ALT-low","ALT-high"), labels = c("ALT_low","ALT_high"))

@@ -10,9 +10,10 @@ output: html_document
 ```{r setup, warning=FALSE}
 library(tidyverse, quietly = T)
 library(readxl)
-source('../scripts/clean_columns.R')
+library(here)
+source(here('scripts', 'clean_columns.R'))
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
-data <- read_xlsx('../data/raw/drivers.xlsx')
+data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 clean_data <- clean_drivers_data(data)
 
 clean_data <- clean_data %>% 

@@ -25,13 +25,14 @@ library(readxl, quietly = TRUE)
 library(tidyverse, quietly = TRUE)
 library(pROC, quietly = TRUE)
 library(caret, quietly = TRUE)
+library(here)
 
-source("../scripts/clean_columns.R")
+source(here('scripts', 'clean_columns.R'))
 
-cache_file <- "../outputs/tabpfn_cv_results.rds"
+cache_file <- here('outputs', 'tabpfn_cv_results.rds')
 run_tabpfn <- !file.exists(cache_file)
 
-data <- read_xlsx("../data/raw/PCAWG_variables_PCA_woK.xlsx")
+data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 
 clean_data <- clean_pcawg_data(data)
 
@@ -266,13 +267,13 @@ metrics_df %>%
 # Interpretability
 
 ```{r export-data, eval=FALSE}
-dir.create("../outputs/shap_input", recursive = TRUE, showWarnings = FALSE)
+dir.create(here('outputs', 'shap_input'), recursive = TRUE, showWarnings = FALSE)
 
-readr::write_csv(as.data.frame(x_train_r), "../outputs/shap_input/X_train.csv")
+readr::write_csv(as.data.frame(x_train_r), here('outputs', 'shap_input', 'X_train.csv'))
 n_shap <- min(20, nrow(x_test_r))
 readr::write_csv(as.data.frame(x_test_r[1:n_shap, , drop = FALSE]),
-                 "../outputs/shap_input/X_test_small.csv")    # we use a smaller test set otherwise it takes too much time
-readr::write_csv(data.frame(y_train = y_train_r), "../outputs/shap_input/y_train.csv")
+                 here('outputs', 'shap_input', 'X_test_small.csv'))    # we use a smaller test set otherwise it takes too much time
+readr::write_csv(data.frame(y_train = y_train_r), here('outputs', 'shap_input', 'y_train.csv'))
 ```
 
 ```{r run-python-script, eval=FALSE}

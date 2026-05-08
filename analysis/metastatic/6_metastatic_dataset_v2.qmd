@@ -19,7 +19,8 @@ We also **remove strong outliers** that can distort our plots and analyses.
 
 ```{r setup}
 library(tidyverse)
-data <- readRDS('../data/processed/drivers_telins.rds')
+library(here)
+data <- readRDS(here('data', 'processed', 'drivers_telins.rds'))
 filt_data <- data %>% 
   drop_na(tel_ins_norm) %>% 
   select(tumor_tf_rate, tel_ins_norm, tel_reads_total, TCAGGG_singletons_norm_by_all_reads,

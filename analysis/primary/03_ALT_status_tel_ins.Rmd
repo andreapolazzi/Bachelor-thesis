@@ -9,8 +9,9 @@ output: html_document
 
 ```{r load&clean}
 library(readxl)
-source('../scripts/clean_columns.R')
-data <- read_xlsx('../data/raw/PCAWG_variables_PCA_woK.xlsx')
+library(here)
+source(here('scripts', 'clean_columns.R'))
+data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 clean_data <- clean_pcawg_data(data)
 model_data_reduced <- clean_data[complete.cases(clean_data), -c(1,2,5)]  # we remove also telomere_insertion_rate
 summary(model_data_reduced)
@@ -91,7 +92,7 @@ p <- ggplot(scores, aes(PC1, PC2, color = ALT)) +
 
 plot(p)
 
-ggsave("../outputs/PCA_biplot_red_telins.pdf", plot = p, width = 7, height = 6)
+ggsave(here('outputs', 'PCA_biplot_red_telins.pdf'), plot = p, width = 7, height = 6)
 ```
 
 Comparing the two PCA biplots, the most evident change **after removing telomere insertion rate** is the **reduction of the strong directional signal toward the lower-left quadrant**. In the full-feature PCA, the telomere insertion rate vector is long and points strongly in that direction, and many ALT-high tumors lie along this axis, indicating that this variable contributes substantially to the separation between ALT-high and ALT-low samples. Once this feature is removed, the PCA structure becomes more centered and the remaining variables distribute more evenly around the origin. The ALT-high samples still tend to occupy the lower-left region of the plot, but **the separation from ALT-low tumors becomes less pronounced**. The remaining vectors, particularly **TGAGGG, TTCGGG, GTAGGG, and TF rate—continue to point toward this region**, suggesting that **these variables now capture part of the variance previously dominated by telomere insertion rate**.

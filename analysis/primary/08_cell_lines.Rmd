@@ -10,8 +10,9 @@ output: html_document
 ```{r setup}
 library(tidyverse)
 library(readxl)
-source('../scripts/useful_plots.R')
-data <- read_xlsx('../data/raw/tab1.xlsx')
+library(here)
+source(here('scripts', 'useful_plots.R'))
+data <- read_xlsx(here('data', 'raw', 'tab1.xlsx'))
 
 ```
 
