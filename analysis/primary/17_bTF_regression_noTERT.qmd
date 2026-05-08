@@ -643,7 +643,6 @@ tibble(
   geom_point(alpha = 0.5, color = "steelblue") +
   geom_abline(slope = 1, intercept = 0,
               linetype = "dashed", color = "grey40") +
-  coord_equal() +
   labs(
     title = "Intensity component: predicted vs observed",
     subtitle = paste0("True positives only (n = ", sum(test_pos_idx),

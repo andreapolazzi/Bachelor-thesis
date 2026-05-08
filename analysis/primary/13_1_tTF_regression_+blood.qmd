@@ -25,6 +25,9 @@ library(randomForest)
 library(caret)
 library(pROC)
 library(broom)
+library(treeshap)
+library(shapviz)
+library(shapr)
 
 data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 clean_data <- data %>% 
@@ -295,9 +298,23 @@ pred_lasso_f  <- as.vector(predict(final_lasso, newx = x_test_f))
 ```
 
 ```{r final-rf}
+train_for_shap <- train %>%
+  mutate(alt_status = as.integer(alt_status) - 1L)  # ALT-low=0, ALT-high=1
+test_for_shap <- test %>%
+  mutate(alt_status = as.integer(alt_status) - 1L)
+
 set.seed(21)
-final_rf  <- randomForest(tf_primary_rate ~ ., data = train, importance = TRUE)
-pred_rf_f <- predict(final_rf, newdata = test)
+final_rf  <- randomForest(tf_primary_rate ~ ., data = train_for_shap, importance = TRUE)
+pred_rf_f <- predict(final_rf, newdata = test_for_shap)
+
+unified <- randomForest.unify(final_rf, train_for_shap)
+shap_out <- treeshap(unified, train_for_shap, verbose = FALSE)
+
+sv <- shapviz(shap_out, X = train_for_shap)
+shapviz::get_feature_values(sv)
+shapviz::sv_waterfall(sv)
+sv_importance(sv, kind = "beeswarm")
+sv_dependence(sv, v = "telomere_insertion_rate")
 ```
 
 ```{r final-results}
@@ -646,7 +663,6 @@ tibble(
   geom_point(alpha = 0.5, color = "steelblue") +
   geom_abline(slope = 1, intercept = 0, 
               linetype = "dashed", color = "grey40") +
-  coord_equal() +
   labs(
     title = "Intensity component: predicted vs observed",
     subtitle = paste0("True positives only (n = ", sum(test_pos_idx), 
