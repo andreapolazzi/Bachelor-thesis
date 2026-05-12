@@ -344,12 +344,12 @@ sv_oof <- shapviz(
   baseline = mean(clean_data_shap$tf_primary_rate)
 )
 
-sv_importance(sv_oof, kind = "beeswarm", bee_adjust = 5, alpha = 0.8)
+sv_importance(sv_oof, kind = "beeswarm", bee_adjust = 5, alpha = 0.8)+ theme_bw()
 
-sv_dependence(sv_oof, v = "telomere_content_log2", color_var = "alt_status")
-sv_dependence(sv_oof, v = "telomere_insertion_rate", color_var = "alt_status")
-sv_dependence(sv_oof, v = "tf_blood_rate",         color_var = "alt_status")
-sv_dependence(sv_oof, v = "alt_status",            color_var = "tf_blood_rate")
+sv_dependence(sv_oof, v = "telomere_content_log2", color_var = "alt_status")+ theme_bw()
+sv_dependence(sv_oof, v = "telomere_insertion_rate", color_var = "alt_status")+ theme_bw()
+sv_dependence(sv_oof, v = "tf_blood_rate",         color_var = "alt_status")+ theme_bw()
+sv_dependence(sv_oof, v = "alt_status",            color_var = "tf_blood_rate")+ theme_bw()
 
 singleton_vars <- c(
     "ATAGGG_singleton_dist",
