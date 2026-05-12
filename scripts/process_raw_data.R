@@ -24,7 +24,7 @@ summary(code_conversion)
 
 code_conversion %>% 
   filter(!complete.cases(.)) %>% 
-  view()
+  print(n = Inf)
 
 code_conv_clean <- code_conversion %>% 
   drop_na(Patient_ID_IF, Patient_ID_IF_mod) %>% 
@@ -45,7 +45,7 @@ only_in_driv  <- setdiff(ids_drivers, ids_code)
 # Let's see which ones are only in code_conversion
 code_conv_clean %>% 
   filter(Patient_ID_IF_mod %in% only_in_code) %>% 
-  view()
+  print(n = Inf)
 
 # Join the datasets, adding patient_code column
 drivers_joined <- clean_drivers %>% 
@@ -72,7 +72,7 @@ sum(is.na(drivers_full$coverage))
 
 drivers_full %>% 
   filter(!complete.cases(coverage)) %>% 
-  view()
+  print(n = Inf)
 
 # Tumor purity ####
 metadata<- readxl::read_xlsx('data/raw/Metadatos_2_to_ALV.xlsx')

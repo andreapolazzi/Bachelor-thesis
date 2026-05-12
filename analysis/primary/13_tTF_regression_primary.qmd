@@ -303,7 +303,11 @@ df <- tibble(
   pred = pred_rf_f,
   error = pred - true,
   abs_error = abs(error),
-  perc_error = paste0(round(error/true, digits = 3) * 100,'%'),
+  perc_error = if_else(
+    true == 0,
+    NA_character_,
+    paste0(round(error / true, digits = 3) * 100, '%')
+  ),
   cancer_type = cancer_type_vector[-train_idx]
 )
 print(df, n=50)

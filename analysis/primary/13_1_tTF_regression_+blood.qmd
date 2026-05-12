@@ -27,7 +27,7 @@ library(pROC)
 library(broom)
 library(treeshap)
 library(shapviz)
-library(shapr)
+library(patchwork)
 
 data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 clean_data <- data %>% 
@@ -298,23 +298,101 @@ pred_lasso_f  <- as.vector(predict(final_lasso, newx = x_test_f))
 ```
 
 ```{r final-rf}
-train_for_shap <- train %>%
-  mutate(alt_status = as.integer(alt_status) - 1L)  # ALT-low=0, ALT-high=1
-test_for_shap <- test %>%
-  mutate(alt_status = as.integer(alt_status) - 1L)
+set.seed(21)
+final_rf  <- randomForest(tf_primary_rate ~ ., data = train, importance = TRUE)
+pred_rf_f <- predict(final_rf, newdata = test)
+```
+
+```{r shapr-rf-cv}
+clean_data_shap <- clean_data %>%
+  # randomForest.unify() does not support categorical predictors.
+  mutate(alt_status = as.numeric(alt_status == "ALT-high"))
+
+k <- 5
+shap_list <- list()
 
 set.seed(21)
-final_rf  <- randomForest(tf_primary_rate ~ ., data = train_for_shap, importance = TRUE)
-pred_rf_f <- predict(final_rf, newdata = test_for_shap)
+fold_list <- createFolds(
+  factor(clean_data_shap$alt_status),
+  k = k,
+  returnTrain = FALSE
+)
+folds <- integer(nrow(clean_data_shap))
+for (i in seq_along(fold_list)) folds[fold_list[[i]]] <- i
 
-unified <- randomForest.unify(final_rf, train_for_shap)
-shap_out <- treeshap(unified, train_for_shap, verbose = FALSE)
+for (i in 1:k) {
+  fold_train      <- clean_data_shap[folds != i, ]
+  fold_test       <- clean_data_shap[folds == i, ]
+  fold_train_shap <- fold_train %>% select(-tf_primary_rate)
+  fold_test_shap  <- fold_test  %>% select(-tf_primary_rate)
+  
+  fit_rf_fold  <- randomForest(tf_primary_rate ~ ., data = fold_train)
+  unified_fold <- randomForest.unify(fit_rf_fold, fold_train_shap)
+  shap_fold    <- treeshap(unified_fold, fold_test_shap, verbose = FALSE)
+  
+  shap_list[[i]] <- list(
+    shap   = shap_fold$shaps,
+    X      = fold_test_shap,
+    row_id = which(folds == i)
+  )
+}
 
-sv <- shapviz(shap_out, X = train_for_shap)
-shapviz::get_feature_values(sv)
-shapviz::sv_waterfall(sv)
-sv_importance(sv, kind = "beeswarm")
-sv_dependence(sv, v = "telomere_insertion_rate")
+shap_matrix <- bind_rows(lapply(shap_list, `[[`, "shap"))
+X_matrix    <- bind_rows(lapply(shap_list, `[[`, "X"))
+row_ids     <- unlist(lapply(shap_list, `[[`, "row_id"))
+ord         <- order(row_ids)
+shap_matrix <- shap_matrix[ord, ]
+X_matrix    <- X_matrix[ord, ]
+
+sv_oof <- shapviz(
+  object   = as.matrix(shap_matrix),
+  X        = X_matrix,
+  baseline = mean(clean_data_shap$tf_primary_rate)
+)
+
+sv_importance(sv_oof, kind = "beeswarm", bee_adjust = 5, alpha = 0.8) +
+  theme_bw()
+
+sv_dependence(sv_oof, v = "telomere_content_log2", color_var = "alt_status") + theme_bw()
+sv_dependence(sv_oof, v = "telomere_insertion_rate", color_var = "alt_status") + theme_bw()
+sv_dependence(sv_oof, v = "tf_blood_rate",         color_var = "alt_status") + theme_bw()
+sv_dependence(sv_oof, v = "TERT_FPKM",             color_var = "alt_status") + theme_bw()
+sv_dependence(sv_oof, v = "alt_status",            color_var = "tf_blood_rate") + theme_bw()
+
+singleton_vars <- c(
+    "ATAGGG_singleton_dist",
+    "CTAGGG_singleton_dist",
+    "GTAGGG_singleton_dist",
+    "TAAGGG_singleton_dist",
+    "TCAGGG_singleton_dist",
+    "TGAGGG_singleton_dist",
+    "TTCGGG_singleton_dist",
+    "TTGGGG_singleton_dist",
+    "TTTGGG_singleton_dist"
+  )
+singleton_plots <- purrr::map(
+  singleton_vars,
+  \(v) {
+    sv_dependence(sv_oof, v = v, color_var = "alt_status") +
+      theme_bw() +
+      theme(
+        plot.title = element_text(size = 10),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 7)
+      )
+  }
+)
+wrap_plots(singleton_plots, ncol = 3, guides = "collect") +
+  plot_annotation(title = "***GGG singleton SHAP dependence")
+
+alt_high_idx <- which(clean_data_shap$alt_status == 1)
+alt_low_idx  <- which(clean_data_shap$alt_status == 0)
+
+sv_waterfall(sv_oof, row_id = alt_high_idx) +
+  ggtitle("Average SHAP - ALT-high") + theme_bw()
+
+sv_waterfall(sv_oof, row_id = alt_low_idx) +
+  ggtitle("Average SHAP - ALT-low") + theme_bw()
 ```
 
 ```{r final-results}
@@ -345,7 +423,11 @@ df <- tibble(
   pred = pred_rf_f,
   error = pred - true,
   abs_error = abs(error),
-  perc_error = paste0(round(error/true, digits = 3) * 100,'%'),
+  perc_error = if_else(
+    true == 0,
+    NA_character_,
+    paste0(round(error / true, digits = 3) * 100, '%')
+  ),
   cancer_type = cancer_type_vector[-train_idx]
 )
 print(df, n=50)
@@ -374,6 +456,8 @@ df %>%
 ```
 
 # Two-part model
+
+In the cross-validation block below, the intensity part is fit on the `log1p`-transformed response used in the main regression pipeline. This keeps the coefficient-stability summaries on comparable transformed-response and standardized-predictor scales. The final two-part regression later is fit on `train_orig_s` to report predictions on the original response scale, so the CV coefficients and final prediction table answer related but different questions.
 
 ```{r two-model}
 k <- 5
@@ -576,9 +660,9 @@ smear_lm    <- mean(exp(residuals(final_lm)))
 smear_lasso <- mean(exp(y_train_f - as.vector(predict(final_lasso, newx = x_train_f))))
 smear_rf    <- mean(exp(train$tf_primary_rate - predict(final_rf)))
 
-pred_lm_orig    <- expm1(pred_lm_f)    * smear_lm
-pred_lasso_orig <- expm1(pred_lasso_f) * smear_lasso
-pred_rf_orig    <- expm1(pred_rf_f)    * smear_rf
+pred_lm_orig    <- exp(pred_lm_f)    * smear_lm - 1
+pred_lasso_orig <- exp(pred_lasso_f) * smear_lasso - 1
+pred_rf_orig    <- exp(pred_rf_f)    * smear_rf - 1
 
 tibble(
   model = c("LM", "LASSO", "Random Forest", "Two-part"),

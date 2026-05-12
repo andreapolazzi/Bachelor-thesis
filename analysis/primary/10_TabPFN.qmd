@@ -16,7 +16,8 @@ execute:
 
 ```{r setup}
 library(reticulate, quietly = TRUE)
-use_virtualenv("~/Desktop/CBM/project/analysis/.venv-tabpfn", required = TRUE)
+tabpfn_venv <- here::here("analysis", ".venv-tabpfn")
+use_virtualenv(tabpfn_venv, required = TRUE)
 py_config()
 
 api_token <- Sys.getenv("TABPFN_TOKEN")
@@ -278,8 +279,8 @@ readr::write_csv(data.frame(y_train = y_train_r), here('outputs', 'shap_input', 
 
 ```{r run-python-script, eval=FALSE}
 cmd <- paste(
-  "source ~/Desktop/CBM/project/analysis/.venv-tabpfn/bin/activate &&",
-  "python ~/Desktop/CBM/project/scripts/run_tabpfn_shap.py"
+  shQuote(reticulate::py_config()$python),
+  shQuote(here("scripts", "run_tabpfn_shap.py"))
 )
 
 Sys.setenv(TABPFN_TOKEN = api_token)
@@ -290,16 +291,16 @@ system(cmd, intern = FALSE, ignore.stdout = FALSE, ignore.stderr = FALSE)
 ## SHAP plots
 
 ```{r shap-images, out.width='85%'}
-shap_files <- c(
-  "figures/tabpfn_shap1.png",
-  "figures/tabpfn_shap2.png",
-  "figures/tabpfn_shap3.png"
+shap_files <- here(
+  "analysis",
+  "figures",
+  c("tabpfn_shap1.png", "tabpfn_shap2.png", "tabpfn_shap3.png")
 )
 
 existing_files <- shap_files[file.exists(shap_files)]
 
 if (length(existing_files) == 0) {
-  cat("No SHAP images found in figures/.")
+  cat("No SHAP images found in analysis/figures/.")
 } else {
   knitr::include_graphics(existing_files)
 }
