@@ -415,18 +415,18 @@ tibble(
 
 ## Quantification of the residuals
 
-Beware that these results are in log1p scale!
+Results are back-transformed to the original scale.
 
 ```{r quantification-error}
 df <- tibble(
-  true = test$tf_primary_rate,
-  pred = pred_rf_f,
+  true = expm1(test$tf_primary_rate),
+  pred = expm1(pred_rf_f),
   error = pred - true,
   abs_error = abs(error),
   perc_error = if_else(
-    expm1(true) == 0,
+    true == 0,
     NA_real_,
-    (expm1(pred) - expm1(true)) / expm1(true) * 100
+    (pred - true) / true * 100
   ),
   cancer_type = cancer_type_vector[-train_idx]
 )
@@ -451,7 +451,7 @@ df %>%
   geom_boxplot(outlier.shape = 21, fill = "steelblue", alpha = 0.6) +
   coord_flip() +
   labs(title = "Absolute error by cancer type (test set)",
-       x = NULL, y = "Absolute error (log1p scale)") +
+       x = NULL, y = "Absolute error (original scale)") +
   theme_bw()
 ```
 
