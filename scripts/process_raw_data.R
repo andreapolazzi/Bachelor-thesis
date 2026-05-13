@@ -353,7 +353,7 @@ write_xlsx(data_no_red_na, here('data','processed','metastatic_reduced.xlsx'))
 
 
 
-# Metastatic intrachromosomal reads TH2
+# Metastatic intrachromosomal reads TH2 ####
 met_red_edit <- readxl::read_xlsx(here('data', 'processed', 'metastatic_reduced_edited.xlsx'))
 th2_results <- read.csv(here('data','raw','telomerehunter2_r3.results','telomerehunter2_r3.summaries.tsv'), sep = '\t')
 code_conv_df <- readRDS(here('data', 'processed', 'drivers_telins.rds'))
@@ -374,3 +374,22 @@ met_intrachrom <- met_red_edit_pat_code %>%
 
 library(writexl)
 write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edited_telins.xlsx'))
+
+
+
+# Cancer grouping ####
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+
+mes_ori <- c('Bone-Epith', 'Bone-Osteosarc', 'CNS-LGG', 'CNS-PiloAstro', 'Panc-Endocrine', 'SoftTissue-Leiomyo', 'SoftTissue-Liposarc')
+nonmes_ori <- setdiff(unique(data$cancer_type), mes_ori)
+
+mesenchymal_grouping <- data %>% 
+  mutate(cancer_group =
+    case_when(
+      cancer_type %in% mes_ori ~ 'Mesenchymal_origin',
+      cancer_type %in% nonmes_ori ~ 'Non_Mesenchymal_origin',
+      TRUE ~ NA_character_
+    )
+  )
+
+write_xlsx(mesenchymal_grouping, here('data', 'processed', 'PCAWG_primary.xlsx'))

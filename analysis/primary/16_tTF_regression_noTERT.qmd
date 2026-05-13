@@ -31,6 +31,7 @@ clean_data <- data %>%
   drop_na() %>% 
   filter(tf_primary_rate<10)
 cancer_type_vector <- clean_data$cancer_type
+cancer_group_vector <- clean_data$cancer_group
 clean_data <- clean_data %>% select(-cancer_type)
 ```
 
