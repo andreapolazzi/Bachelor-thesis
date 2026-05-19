@@ -357,8 +357,71 @@ write_xlsx(data_no_red_na, here('data','processed','metastatic_reduced.xlsx'))
 # Metastatic intrachromosomal reads TH2 ####
 met_red_edit <- readxl::read_xlsx(here('data', 'processed', 'metastatic_reduced_edited.xlsx'))
 th2_results <- read.csv(here('data','raw','telomerehunter2_r3.results','telomerehunter2_r3.summaries.tsv'), sep = '\t')
+th_singleton_results <- readr::read_tsv(
+  here('..', 'telomerehunter_results', 'telomere-hunter-all-summary-080426_nolog.tsv.gz'),
+  show_col_types = FALSE
+)
 code_conv_df <- readRDS(here('data', 'processed', 'drivers_telins.rds'))
 total_reads_used_df <- readxl::read_xlsx(here('data', 'raw', 'Samples_hartwig_coverage_A.xlsx'))
+
+singleton_patterns <- c(
+  "TCAGGG", "TGAGGG", "TTGGGG", "TTCGGG", "TTTGGG",
+  "ATAGGG", "CATGGG", "CTAGGG", "GTAGGG", "TAAGGG"
+)
+singleton_norm_cols <- paste0(singleton_patterns, "_singletons_norm_by_all_reads")
+singleton_dist_cols <- paste0(singleton_patterns, "_singleton_dist")
+
+# TelomereHunter's singleton distance is:
+# log2(singleton_tumor_norm / singleton_control_norm) -
+# log2(tel_content_tumor / tel_content_control).
+#
+# The available summary has singleton counts already normalized by the
+# TelomereHunter total_reads column. Recover the raw singleton counts first,
+# then normalize those counts by the WGS Total_reads_used denominator used in
+# the metastatic table.
+singleton_dist_df <- th_singleton_results %>%
+  select(PID, sample, total_reads, tel_content, all_of(singleton_norm_cols)) %>%
+  mutate(
+    tumor_code = str_remove(PID, "-.*$"),
+    control_code = str_remove(PID, "^[^-]+-"),
+    sample_code = if_else(sample == "tumor", tumor_code, control_code)
+  ) %>%
+  pivot_longer(
+    cols = all_of(singleton_norm_cols),
+    names_to = "singleton_col",
+    values_to = "singleton_norm_by_th_reads"
+  ) %>%
+  mutate(
+    pattern = str_remove(singleton_col, "_singletons_norm_by_all_reads$"),
+    singleton_count = singleton_norm_by_th_reads * total_reads
+  ) %>%
+  left_join(
+    total_reads_used_df %>%
+      select(sample_code = sample, wgs_total_reads_used = Total_reads_used),
+    by = "sample_code"
+  ) %>%
+  mutate(singleton_norm_by_wgs_reads = singleton_count / wgs_total_reads_used) %>%
+  group_by(tumor_code, pattern, sample) %>%
+  summarise(
+    tel_content = first(na.omit(tel_content)),
+    singleton_norm_by_wgs_reads = first(na.omit(singleton_norm_by_wgs_reads)),
+    .groups = "drop"
+  ) %>%
+  select(tumor_code, pattern, sample, tel_content, singleton_norm_by_wgs_reads) %>%
+  pivot_wider(
+    names_from = sample,
+    values_from = c(tel_content, singleton_norm_by_wgs_reads),
+    names_sep = "_"
+  ) %>%
+  mutate(
+    singleton_dist = log2(
+      singleton_norm_by_wgs_reads_tumor / singleton_norm_by_wgs_reads_control
+    ) - log2(tel_content_tumor / tel_content_control),
+    singleton_dist = as.character(singleton_dist),
+    singleton_dist_col = paste0(pattern, "_singleton_dist")
+  ) %>%
+  select(tumor_code, singleton_dist_col, singleton_dist) %>%
+  pivot_wider(names_from = singleton_dist_col, values_from = singleton_dist)
 
 # add patient code
 met_red_edit_pat_code <- met_red_edit %>% 
@@ -378,11 +441,13 @@ intrachrom_df <- th2_results %>%
 met_intrachrom <- total_reads_used %>% 
   left_join(intrachrom_df %>% select(patient_code, intrachromosomal_reads), by = 'patient_code'
   ) %>% 
+  left_join(singleton_dist_df, by = join_by(patient_code == tumor_code)) %>%
   mutate(intrachrom_reads_total_reads = intrachromosomal_reads/Total_reads_used) %>% 
   relocate(intrachrom_reads_total_reads, .before = intratel_reads_total_reads) %>% 
+  relocate(any_of(singleton_dist_cols), .after = TAAGGG_singletons_norm_by_all_reads) %>%
   select(-patient_code, -Total_reads_used, -intrachromosomal_reads)
 library(writexl)
-write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edited+intrachrom.xlsx'))
+write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
 
 
 
