@@ -57,6 +57,8 @@ pcaplt$plot
 ```{r biplot-tvr}
 biplot <- pca_biplot(pca_data, title = 'PCA biplot (TVR feature)', scale_arrows = 5)
 biplot$plot
+
+ggsave(here('outputs', 'cell_lines_PCA_biplot.pdf'))
 ```
 
 This is an **almost exact replica of the paper's Fig 1B**. 
