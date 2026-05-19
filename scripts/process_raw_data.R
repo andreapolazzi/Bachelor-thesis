@@ -363,6 +363,18 @@ th_singleton_results <- readr::read_tsv(
 )
 code_conv_df <- readRDS(here('data', 'processed', 'drivers_telins.rds'))
 total_reads_used_df <- readxl::read_xlsx(here('data', 'raw', 'Samples_hartwig_coverage_A.xlsx'))
+total_reads_used_missing_df <- readr::read_csv(
+  here('data', 'raw', 'total_reads_used_missing.csv'),
+  show_col_types = FALSE
+) %>%
+  transmute(sample = patient_code, Total_reads_used = TOTAL_READS_USED)
+
+total_reads_used_df <- total_reads_used_df %>%
+  rows_patch(total_reads_used_missing_df, by = "sample", unmatched = "ignore") %>%
+  bind_rows(
+    total_reads_used_missing_df %>%
+      anti_join(total_reads_used_df, by = "sample")
+  )
 
 singleton_patterns <- c(
   "TCAGGG", "TGAGGG", "TTGGGG", "TTCGGG", "TTTGGG",
@@ -370,22 +382,106 @@ singleton_patterns <- c(
 )
 singleton_norm_cols <- paste0(singleton_patterns, "_singletons_norm_by_all_reads")
 singleton_dist_cols <- paste0(singleton_patterns, "_singleton_dist")
+singleton_rel_tol <- 5e-3
+
+# add patient code
+met_red_edit_pat_code <- met_red_edit %>% 
+  left_join(code_conv_df %>% select(patient_id, patient_code), by = 'patient_id') %>% 
+  relocate(patient_code, .after = patient_id)
 
 # TelomereHunter's singleton distance is:
 # log2(singleton_tumor_norm / singleton_control_norm) -
 # log2(tel_content_tumor / tel_content_control).
 #
-# The available summary has singleton counts already normalized by the
-# TelomereHunter total_reads column. Recover the raw singleton counts first,
-# then normalize those counts by the WGS Total_reads_used denominator used in
-# the metastatic table.
-singleton_dist_df <- th_singleton_results %>%
+# The metastatic table already contains tumor singleton counts normalized by
+# WGS total reads. First check those values match the values recovered from the
+# TelomereHunter summary within a small tolerance, then use the existing
+# metastatic tumor values directly. Control values are recovered from the
+# TelomereHunter summary and normalized by the control WGS Total_reads_used.
+
+# Step 1: recompute tumor singleton normalization from the TH summary (reference for cross-check)
+th_tumor_normalized <- th_singleton_results %>%
+  select(PID, sample, total_reads, all_of(singleton_norm_cols)) %>%
+  filter(sample == "tumor") %>%
+  mutate(sample_code = str_remove(PID, "-.*$")) %>%
+  pivot_longer(
+    cols = all_of(singleton_norm_cols),
+    names_to = "singleton_col",
+    values_to = "singleton_norm_by_th_reads"
+  ) %>%
+  mutate(singleton_count = singleton_norm_by_th_reads * total_reads) %>%
+  left_join(
+    total_reads_used_df %>%
+      select(sample_code = sample, wgs_total_reads_used = Total_reads_used),
+    by = "sample_code"
+  ) %>%
+  mutate(singleton_norm_by_wgs_reads = singleton_count / wgs_total_reads_used) %>%
+  group_by(sample_code, singleton_col) %>%
+  summarise(
+    singleton_norm_by_wgs_reads = first(na.omit(singleton_norm_by_wgs_reads)),
+    .groups = "drop"
+  )
+
+# Step 2: compare TH-derived values against values already stored in the metastatic table
+tumor_singleton_check <- met_red_edit_pat_code %>%
+  select(patient_id, patient_code, all_of(singleton_norm_cols)) %>%
+  pivot_longer(
+    cols = all_of(singleton_norm_cols),
+    names_to = "singleton_col",
+    values_to = "singleton_norm_existing"
+  ) %>%
+  left_join(
+    th_tumor_normalized,
+    by = join_by(patient_code == sample_code, singleton_col)
+  ) %>%
+  filter(!is.na(singleton_norm_existing), !is.na(singleton_norm_by_wgs_reads)) %>%
+  mutate(
+    abs_diff = abs(singleton_norm_existing - singleton_norm_by_wgs_reads),
+    rel_diff = abs_diff / pmax(
+      abs(singleton_norm_existing),
+      abs(singleton_norm_by_wgs_reads),
+      .Machine$double.eps
+    ),
+    within_tolerance = (
+      singleton_norm_existing == 0 & singleton_norm_by_wgs_reads == 0
+    ) | rel_diff <= singleton_rel_tol
+  )
+
+if (any(!tumor_singleton_check$within_tolerance)) {
+  stop(
+    "Existing tumor *_singletons_norm_by_all_reads values do not match ",
+    "raw singleton counts / Total_reads_used within tolerance."
+  )
+}
+
+# Step 3: use the now-validated tumor values from the metastatic table directly
+tumor_singletons_existing <- met_red_edit_pat_code %>%
+  select(patient_code, all_of(singleton_norm_cols)) %>%
+  pivot_longer(
+    cols = all_of(singleton_norm_cols),
+    names_to = "singleton_col",
+    values_to = "singleton_norm_by_wgs_reads_tumor"
+  ) %>%
+  mutate(pattern = str_remove(singleton_col, "_singletons_norm_by_all_reads$")) %>%
+  select(tumor_code = patient_code, pattern, singleton_norm_by_wgs_reads_tumor) %>%
+  distinct()
+
+# Step 4: extract control singleton normalization from TH summary.
+# tel_content is spread across separate tumor/control rows per PID; fill() broadcasts
+# both values within each PID group before filtering down to the control row only.
+control_singletons <- th_singleton_results %>%
   select(PID, sample, total_reads, tel_content, all_of(singleton_norm_cols)) %>%
   mutate(
     tumor_code = str_remove(PID, "-.*$"),
     control_code = str_remove(PID, "^[^-]+-"),
-    sample_code = if_else(sample == "tumor", tumor_code, control_code)
+    sample_code = if_else(sample == "tumor", tumor_code, control_code),
+    tel_content_tumor = if_else(sample == "tumor", tel_content, NA_real_),
+    tel_content_control = if_else(sample == "control", tel_content, NA_real_)
   ) %>%
+  group_by(tumor_code) %>%
+  fill(tel_content_tumor, tel_content_control, .direction = "downup") %>%
+  ungroup() %>%
+  filter(sample == "control") %>%
   pivot_longer(
     cols = all_of(singleton_norm_cols),
     names_to = "singleton_col",
@@ -400,45 +496,42 @@ singleton_dist_df <- th_singleton_results %>%
       select(sample_code = sample, wgs_total_reads_used = Total_reads_used),
     by = "sample_code"
   ) %>%
-  mutate(singleton_norm_by_wgs_reads = singleton_count / wgs_total_reads_used) %>%
-  group_by(tumor_code, pattern, sample) %>%
+  mutate(singleton_norm_by_wgs_reads_control = singleton_count / wgs_total_reads_used) %>%
+  group_by(tumor_code, pattern) %>%
   summarise(
-    tel_content = first(na.omit(tel_content)),
-    singleton_norm_by_wgs_reads = first(na.omit(singleton_norm_by_wgs_reads)),
+    tel_content_tumor = first(na.omit(tel_content_tumor)),
+    tel_content_control = first(na.omit(tel_content_control)),
+    singleton_norm_by_wgs_reads_control = first(na.omit(singleton_norm_by_wgs_reads_control)),
     .groups = "drop"
-  ) %>%
-  select(tumor_code, pattern, sample, tel_content, singleton_norm_by_wgs_reads) %>%
-  pivot_wider(
-    names_from = sample,
-    values_from = c(tel_content, singleton_norm_by_wgs_reads),
-    names_sep = "_"
-  ) %>%
+  )
+
+# Step 5: compute singleton_dist = log2(tumor_norm / control_norm) - log2(tel_content_tumor / tel_content_control)
+singleton_dist_df <- tumor_singletons_existing %>%
+  left_join(control_singletons, by = c("tumor_code", "pattern")) %>%
   mutate(
-    singleton_dist = log2(
-      singleton_norm_by_wgs_reads_tumor / singleton_norm_by_wgs_reads_control
-    ) - log2(tel_content_tumor / tel_content_control),
-    singleton_dist = as.character(singleton_dist),
+    singleton_dist = if_else(
+      singleton_norm_by_wgs_reads_tumor == 0 | singleton_norm_by_wgs_reads_control == 0,
+      NA_real_,
+      log2(singleton_norm_by_wgs_reads_tumor / singleton_norm_by_wgs_reads_control) -
+        log2(tel_content_tumor / tel_content_control)
+    ),
     singleton_dist_col = paste0(pattern, "_singleton_dist")
   ) %>%
   select(tumor_code, singleton_dist_col, singleton_dist) %>%
   pivot_wider(names_from = singleton_dist_col, values_from = singleton_dist)
 
-# add patient code
-met_red_edit_pat_code <- met_red_edit %>% 
-  left_join(code_conv_df %>% select(patient_id, patient_code), by = 'patient_id') %>% 
-  relocate(patient_code, .after = patient_id)
-
-total_reads_used <- met_red_edit_pat_code %>% 
+# Add Total_reads_used to the main table for intrachromosomal normalization
+total_reads_used <- met_red_edit_pat_code %>%
   left_join(total_reads_used_df %>% select(sample, Total_reads_used),
-            join_by(patient_code == sample)) %>% 
-  drop_na(Total_reads_used)    # losing 301 patients without info on total_reads_used
+            join_by(patient_code == sample))
 
-# extract patient code and create intrachrom/total_reads_used column
-intrachrom_df <- th2_results %>% 
-  filter(sample == 'tumor') %>% 
+# Extract tumor intrachromosomal reads from TH2, keyed by patient code
+intrachrom_df <- th2_results %>%
+  filter(sample == 'tumor') %>%
   mutate(patient_code = str_remove(PID, "-.*$"))
 
-met_intrachrom <- total_reads_used %>% 
+# Assemble final table: intrachromosomal reads + singleton distances + normalization
+met_intrachrom <- total_reads_used %>%
   left_join(intrachrom_df %>% select(patient_code, intrachromosomal_reads), by = 'patient_code'
   ) %>% 
   left_join(singleton_dist_df, by = join_by(patient_code == tumor_code)) %>%
