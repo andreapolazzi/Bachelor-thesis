@@ -182,8 +182,8 @@ loadings2 <- data.frame(
 )
 
 # scale the loadings (smaller than sample coordinates) to make arrows more visible
-loadings2$PC1 <- loadings2$PC1 * 10
-loadings2$PC2 <- loadings2$PC2 * 10
+loadings2$PC1 <- loadings2$PC1 * 18
+loadings2$PC2 <- loadings2$PC2 * 18
 
 library(ggplot2)
 library(ggrepel)
