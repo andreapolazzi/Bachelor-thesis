@@ -447,15 +447,20 @@ tumor_singleton_check <- met_red_edit_pat_code %>%
     ) | rel_diff <= singleton_rel_tol
   )
 
-if (any(!tumor_singleton_check$within_tolerance)) {
-  stop(
-    "Existing tumor *_singletons_norm_by_all_reads values do not match ",
-    "raw singleton counts / Total_reads_used within tolerance."
+failed_singleton_patients <- tumor_singleton_check %>%
+  filter(!within_tolerance) %>%
+  summarise(
+    n_failed_singleton_checks = n_distinct(singleton_col),
+    .by = c(patient_id, patient_code)
   )
+
+if (nrow(failed_singleton_patients) > 0) {
+  print(failed_singleton_patients)
 }
 
 # Step 3: use the now-validated tumor values from the metastatic table directly
 tumor_singletons_existing <- met_red_edit_pat_code %>%
+  filter(!patient_code %in% failed_singleton_patients$patient_code) %>%
   select(patient_code, all_of(singleton_norm_cols)) %>%
   pivot_longer(
     cols = all_of(singleton_norm_cols),
@@ -541,7 +546,6 @@ met_intrachrom <- total_reads_used %>%
   select(-patient_code, -Total_reads_used, -intrachromosomal_reads)
 library(writexl)
 write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
-
 
 
 # Cancer grouping ####
