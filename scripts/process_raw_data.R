@@ -720,4 +720,67 @@ mesenchymal_grouping <- data %>%
 write_xlsx(mesenchymal_grouping, here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 
+# Gene mutations primary ####
+genes_raw <- readxl::read_xlsx(
+  here('data', 'raw', 'TableS3_panorama_driver_mutations_pcawg_v2_18042018_IF_mod.xlsx')
+)
+genes_raw <- genes_raw[-1, ]  # remove placeholder header row
+
+# POT1 and DLG2 are absent from this dataset and are dropped.
+genes_of_interest <- c('ATRX', 'DAXX', 'TERT', 'TSC2', 'MEN1', 'MET', 'KRAS', 'VHL')
+gene_cols         <- c('ATRX_DAXX_trunc', 'TERT_mod', 'TSC2', 'MEN1', 'MET', 'KRAS', 'VHL')
+
+# ATRX/DAXX and TERT: flag only rows where TMM_associated_mut_summary matches the
+# expected class label. All other genes: flag by presence in the gene column.
+genes_long <- genes_raw %>%
+  filter(gene %in% genes_of_interest) %>%
+  select(sample = `sample...1`, gene, tmm = TMM_associated_mut_summary) %>%
+  mutate(
+    mut_col = case_when(
+      gene %in% c('ATRX', 'DAXX') ~ 'ATRX_DAXX_trunc',
+      gene == 'TERT'               ~ 'TERT_mod',
+      TRUE                         ~ gene
+    ),
+    present = case_when(
+      gene %in% c('ATRX', 'DAXX') ~ tmm == 'ATRX_DAXX_trunc',
+      gene == 'TERT'               ~ tmm == 'TERT_mod',
+      TRUE                         ~ TRUE
+    )
+  ) %>%
+  filter(present) %>%
+  distinct(sample, mut_col)
+
+# All samples present in the genes dataset: used to distinguish "no mutation found"
+# (FALSE) from "sample not in genes dataset" (NA) after the join.
+genes_samples <- genes_raw %>% distinct(sample = `sample...1`)
+
+genes_wide <- genes_long %>%
+  mutate(present = TRUE) %>%
+  pivot_wider(
+    id_cols     = sample,
+    names_from  = mut_col,
+    values_from = present,
+    values_fill = FALSE
+  ) %>%
+  right_join(genes_samples, by = 'sample') %>%
+  mutate(across(all_of(gene_cols), ~ replace_na(.x, FALSE))) %>%
+  select(sample, all_of(gene_cols))
+
+# Join gene mutation columns to primary dataset.
+# Samples absent from the genes dataset retain NA (unknown), not FALSE (wild-type).
+data_primary <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+
+data_primary_genes <- data_primary %>%
+  left_join(genes_wide, by = join_by(donor_id == sample))
+
+# Samples in primary but not in genes dataset
+missing_from_genes <- data_primary_genes %>%
+  filter(is.na(ATRX_DAXX_trunc)) %>%
+  pull(donor_id)
+cat('Primary samples absent from genes dataset (n =', length(missing_from_genes), '):\n')
+print(missing_from_genes)
+
+write_xlsx(data_primary_genes, here('data', 'processed', 'PCAWG_primary.xlsx'))
+
+
 # total_reads_used ####
