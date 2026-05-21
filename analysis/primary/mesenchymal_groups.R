@@ -360,6 +360,34 @@ plt_response_alt <- df_group %>%
 plt_response / plt_response_alt
 
 
+plt_response <- df_group %>%
+  ggplot(aes(x = cancer_group, y = tf_blood_rate, fill = cancer_group)) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.5, size = 0.9) +
+  scale_fill_manual(values = grp_colors) +
+  labs(title = "tf_blood_rate (log1p) by cancer group",
+       subtitle = "Is the prediction target itself shifted?",
+       x = NULL, y = "tf_blood_rate (log1p)") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+plt_response_alt <- df_group %>%
+  ggplot(aes(x = cancer_group, y = tf_blood_rate, fill = cancer_group)) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.5, size = 0.8) +
+  facet_wrap(~ alt_status) +
+  scale_fill_manual(values = grp_colors) +
+  labs(title = "tf_blood_rate by group, stratified by ALT status",
+       subtitle = "Check whether group effect survives ALT stratification",
+       x = NULL, y = "tf_blood_rate (log1p)") +
+  theme_bw() +
+  theme(legend.position = "none")
+
+plt_response / plt_response_alt
+
+
 # ---- 6. Bivariate view -------------------------------------
 
 top2 <- group_diff_plot$feature[order(-abs(group_diff_plot$cliff_delta))][1:2]

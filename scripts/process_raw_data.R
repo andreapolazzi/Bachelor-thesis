@@ -720,6 +720,9 @@ mesenchymal_grouping <- data %>%
 write_xlsx(mesenchymal_grouping, here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 
+
+
+
 # Gene mutations primary ####
 genes_raw <- readxl::read_xlsx(
   here('data', 'raw', 'TableS3_panorama_driver_mutations_pcawg_v2_18042018_IF_mod.xlsx')
@@ -780,7 +783,5 @@ missing_from_genes <- data_primary_genes %>%
 cat('Primary samples absent from genes dataset (n =', length(missing_from_genes), '):\n')
 print(missing_from_genes)
 
-write_xlsx(data_primary_genes, here('data', 'processed', 'PCAWG_primary.xlsx'))
+write_xlsx(data_primary_genes, here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
 
-
-# total_reads_used ####
