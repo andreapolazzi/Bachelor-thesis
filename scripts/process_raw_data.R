@@ -543,7 +543,7 @@ met_intrachrom <- total_reads_used %>%
   mutate(intrachrom_reads_total_reads = intrachromosomal_reads/Total_reads_used) %>% 
   relocate(intrachrom_reads_total_reads, .before = intratel_reads_total_reads) %>% 
   relocate(any_of(singleton_dist_cols), .after = TAAGGG_singletons_norm_by_all_reads) %>%
-  select(-patient_code, -Total_reads_used, -intrachromosomal_reads)
+  select(where(~ !all(is.na(.))), -patient_code, -Total_reads_used, -intrachromosomal_reads, -CATGGG_singletons_norm_by_all_reads, -CATGGG_singleton_dist)
 library(writexl)
 write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
 
