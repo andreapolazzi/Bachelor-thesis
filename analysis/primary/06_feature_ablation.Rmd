@@ -1,5 +1,5 @@
 ---
-title: "08_feature_ablation"
+title: "06_feature_ablation"
 author: 'Andrea Polazzi'
 date: '`r Sys.Date()`'
 output: html_document
@@ -42,12 +42,12 @@ feature_sets <- list(
 
 ```{r cv-setup}
 set.seed(21)
-folds <- createMultiFolds(model_data$alt_status, k = 5, times = 20)
+folds <- createMultiFolds(model_data$alt_status, k = 5, times = 5)
 
 ctrl <- trainControl(
   method = "repeatedcv",
   number = 5,
-  repeats = 20,
+  repeats = 5,
   index = folds,
   classProbs = TRUE,
   summaryFunction = twoClassSummary,
@@ -181,4 +181,430 @@ The **small increases** in AUC that we see we have after removing certain featur
 
 **Removing TVR motif** features causes the **largest performance decrease** in both models, particularly for Random Forest, suggesting that telomere variant repeat composition contains strong predictive information for ALT status. **Removing telomere insertion rate** also **noticeably reduces performance**.
 
-Of course, **when removing TVR motifs we are removing 9 individual features instead of one**, and thus an abrupt decrease in performance can be expected. Although informative on TVR motifs contribution to classification, **the comparison is not fair**. What could be interesting is to perform a **LOFO on each individual TVR motif**, looking for the ones having more discriminatory power.
+Of course, **when removing TVR motifs we are removing 9 individual features instead of one**, and thus an abrupt decrease in performance can be expected. Although informative on TVR motifs contribution to classification, **the comparison is not fair**. The three sections below address this and provide a rigorous statistical basis for the findings.
+
+---
+
+# Statistical Validation of ΔAUC
+
+The mean ΔAUC reported above is a single point estimate. Because we used repeated cross-validation, each model was evaluated on 100 independent resamples (5 folds × 5 repeats), and the same fold assignments were used for every feature set. This allows **paired** comparison: for every resample we can compute the exact AUC difference between the ablated and full model, then test whether the distribution of these differences is centred at zero.
+
+```{r stat-validation, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(here)
+
+dir.create(here("outputs", "feature_ablation"), showWarnings = FALSE, recursive = TRUE)
+
+# --- combine all resamples into a single tidy frame ---
+all_resamples_df <- bind_rows(all_resamples)
+
+# Reference: per-resample AUC of the full model, by model type
+full_roc_ref <- all_resamples_df %>%
+  filter(feature_set == "full") %>%
+  select(Resample, model, ROC_full = ROC)
+
+# Paired ΔAUC = AUC[ablated] − AUC[full], matched by Resample × model
+delta_per_resample <- all_resamples_df %>%
+  filter(feature_set != "full") %>%
+  left_join(full_roc_ref, by = c("Resample", "model")) %>%
+  mutate(delta_AUC = ROC - ROC_full)
+
+# Summary statistics + paired Wilcoxon test (H0: median ΔAUC = 0)
+stat_summary <- delta_per_resample %>%
+  group_by(feature_set, model) %>%
+  summarise(
+    n          = sum(!is.na(delta_AUC)),
+    mean_delta = mean(delta_AUC, na.rm = TRUE),
+    sd_delta   = sd(delta_AUC,   na.rm = TRUE),
+    ci_low     = mean_delta - qt(0.975, df = n - 1) * sd_delta / sqrt(n),
+    ci_high    = mean_delta + qt(0.975, df = n - 1) * sd_delta / sqrt(n),
+    p_wilcoxon = wilcox.test(delta_AUC[!is.na(delta_AUC)],
+                              mu = 0, exact = FALSE)$p.value,
+    .groups    = "drop"
+  ) %>%
+  group_by(model) %>%
+  mutate(p_adj_fdr   = p.adjust(p_wilcoxon, method = "fdr"),
+         significant = p_adj_fdr < 0.05) %>%
+  ungroup()
+
+stat_summary %>%
+  arrange(model, mean_delta) %>%
+  mutate(across(c(mean_delta, sd_delta, ci_low, ci_high), ~ round(.x, 4)),
+         across(c(p_wilcoxon, p_adj_fdr), ~ signif(.x, 3))) %>%
+  print(n = Inf)
+
+write_csv(stat_summary, here("outputs", "feature_ablation", "stat_summary_group_ablation.csv"))
+```
+
+## ΔAUC distributions across resamples
+
+The boxplots below show the full distribution of per-resample ΔAUC for each ablated feature set. A distribution centred well below zero indicates a consistent performance penalty; one centred near zero indicates that the removed feature added little independent information.
+
+```{r plot-delta-distributions, message=FALSE, warning=FALSE, fig.width=10, fig.height=5}
+fs_labels <- c(
+  no_tel_insert  = "−Tel. insertion",
+  no_tf          = "−TF rate",
+  no_TERT        = "−TERT FPKM",
+  no_tel_content = "−Tel. content",
+  no_TVRs        = "−All TVR motifs"
+)
+
+delta_per_resample_labelled <- delta_per_resample %>%
+  mutate(fs_label = recode(feature_set, !!!fs_labels))
+
+p_box <- ggplot(delta_per_resample_labelled,
+                aes(x = reorder(fs_label, delta_AUC, FUN = median),
+                    y = delta_AUC, fill = fs_label)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+  geom_boxplot(outlier.size = 0.4, alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~model) +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set2") +
+  labs(
+    title = "Per-resample ΔAUC relative to full model",
+    subtitle = "Each box summarises 25 resamples (5-fold × 5-repeat CV)",
+    x = NULL, y = "ΔAUC (ablated − full)"
+  ) +
+  theme_bw(base_size = 11)
+
+print(p_box)
+ggsave(here("outputs", "feature_ablation", "delta_AUC_distributions.pdf"),
+       p_box, width = 10, height = 5)
+```
+
+## Confidence intervals and FDR-corrected significance
+
+```{r plot-ci-significance, message=FALSE, warning=FALSE, fig.width=9, fig.height=4}
+stat_summary_labelled <- stat_summary %>%
+  mutate(fs_label = recode(feature_set, !!!fs_labels))
+
+p_ci <- ggplot(stat_summary_labelled,
+               aes(x = reorder(fs_label, mean_delta),
+                   y = mean_delta, colour = significant)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+  geom_pointrange(aes(ymin = ci_low, ymax = ci_high), size = 0.7,
+                  position = position_dodge(width = 0.4)) +
+  geom_text(aes(label = ifelse(significant, "*", "ns"),
+                y = ci_high + 0.005),
+            size = 3.5, show.legend = FALSE) +
+  facet_wrap(~model) +
+  coord_flip() +
+  scale_colour_manual(values = c("FALSE" = "grey55", "TRUE" = "#d73027"),
+                      labels = c("ns (FDR ≥ 0.05)", "FDR < 0.05")) +
+  labs(
+    title   = "Mean ΔAUC with 95% CI (paired Wilcoxon, FDR-adjusted)",
+    x       = NULL,
+    y       = "Mean ΔAUC (ablated − full)",
+    colour  = NULL
+  ) +
+  theme_bw(base_size = 11) +
+  theme(legend.position = "bottom")
+
+print(p_ci)
+ggsave(here("outputs", "feature_ablation", "delta_AUC_CI_significance.pdf"),
+       p_ci, width = 9, height = 4)
+```
+
+The paired Wilcoxon test (one-sample, H₀: median ΔAUC = 0) and FDR correction across feature sets distinguish **systematic** performance changes from random fold-to-fold variation. A negative ΔAUC with FDR < 0.05 means the removed feature consistently contributed predictive power. A non-significant ΔAUC — particularly for TERT, TF rate, or telomere content — does not imply biological irrelevance; it may reflect **feature redundancy** (see Section 3).
+
+---
+
+# Within-TVR LOFO Analysis
+
+The group ablation above removed all nine TVR singleton distance features at once. To fairly rank individual motifs, the LOFO must be evaluated in a context where TVR features are the **only predictors**: including other strong signals (telomere insertion rate, TERT) would absorb most of the classification variance, shrinking each motif's marginal ΔAUC to near zero and making differences between motifs undetectable. The TVR-only context also uses the larger dataset of patients not excluded by TERT missingness (~1943 vs ~817), giving more power to detect within-family differences.
+
+The **baseline** is a model trained on all nine TVR motifs. ΔAUC = AUC[8-motif model] − AUC[all-9 baseline]. The most negative ΔAUC identifies the motif carrying the most non-redundant discriminatory power within the TVR feature family.
+
+```{r lofo-data-setup, message=FALSE, warning=FALSE}
+# Build TVR-only dataset from all patients with TVR data (no TERT restriction)
+tvr_cols  <- grep("_singleton_dist$", names(clean_data), value = TRUE)
+tvr_short <- sub("_singleton_dist$", "", tvr_cols)
+
+model_data_tvr <- clean_data %>%
+  select(alt_status, all_of(tvr_cols)) %>%
+  drop_na() %>%
+  mutate(alt_status = factor(alt_status,
+                              levels = c("ALT-low", "ALT-high"),
+                              labels = c("ALT_low",  "ALT_high")))
+
+cat(sprintf("TVR-only dataset: %d patients, %d TVR features\n",
+            nrow(model_data_tvr), length(tvr_cols)))
+table(model_data_tvr$alt_status)
+
+# Separate folds and ctrl for this dataset (different n than model_data)
+set.seed(21)
+folds_tvr <- createMultiFolds(model_data_tvr$alt_status, k = 5, times = 5)
+
+ctrl_tvr <- trainControl(
+  method          = "repeatedcv",
+  number          = 5,
+  repeats         = 5,
+  index           = folds_tvr,
+  classProbs      = TRUE,
+  summaryFunction = twoClassSummary,
+  savePredictions = "final"
+)
+
+# Feature sets: all-TVR baseline + one-motif-out for each motif
+lofo_sets <- c(
+  list(all_TVRs = model_data_tvr),
+  setNames(
+    lapply(tvr_cols, function(col)
+      model_data_tvr[, !names(model_data_tvr) %in% col]),
+    paste0("no_", tvr_short)
+  )
+)
+
+cat("\nLOFO feature sets:\n")
+cat(paste(" •", names(lofo_sets)), sep = "\n")
+```
+
+```{r lofo-training, warning=FALSE, message=FALSE, cache=TRUE}
+library(randomForest)
+library(caret)
+
+lofo_resamples <- list()
+lofo_results   <- data.frame()
+
+set.seed(21)
+
+for (fs in names(lofo_sets)) {
+
+  df <- lofo_sets[[fs]]
+
+  log_model <- train(
+    alt_status ~ .,
+    data      = df,
+    method    = "glm",
+    family    = "binomial",
+    metric    = "ROC",
+    trControl = ctrl_tvr
+  )
+
+  rf_model <- train(
+    alt_status ~ .,
+    data      = df,
+    method    = "rf",
+    metric    = "ROC",
+    trControl = ctrl_tvr
+  )
+
+  for (nm in c("LogReg", "RF")) {
+    m  <- if (nm == "LogReg") log_model else rf_model
+    rs <- m$resample
+    rs$feature_set <- fs
+    rs$model       <- nm
+    lofo_resamples[[paste(fs, nm, sep = "_")]] <- rs
+
+    lofo_results <- rbind(lofo_results, data.frame(
+      feature_set = fs,
+      model       = nm,
+      mean_AUC    = mean(rs$ROC, na.rm = TRUE),
+      sd_AUC      = sd(rs$ROC,   na.rm = TRUE)
+    ))
+  }
+}
+```
+
+```{r lofo-stats, message=FALSE, warning=FALSE}
+lofo_resamples_df <- bind_rows(lofo_resamples)
+
+# Reference: all-9-TVR baseline AUC per resample and model type
+tvr_roc_ref <- lofo_resamples_df %>%
+  filter(feature_set == "all_TVRs") %>%
+  select(Resample, model, ROC_baseline = ROC)
+
+# Paired ΔAUC = AUC[8-motif] − AUC[all-9 baseline]
+lofo_delta_df <- lofo_resamples_df %>%
+  filter(feature_set != "all_TVRs") %>%
+  left_join(tvr_roc_ref, by = c("Resample", "model")) %>%
+  mutate(
+    delta_AUC = ROC - ROC_baseline,
+    motif     = sub("^no_", "", feature_set)
+  )
+
+lofo_stat_summary <- lofo_delta_df %>%
+  group_by(feature_set, motif, model) %>%
+  summarise(
+    n          = sum(!is.na(delta_AUC)),
+    mean_delta = mean(delta_AUC, na.rm = TRUE),
+    sd_delta   = sd(delta_AUC,   na.rm = TRUE),
+    ci_low     = mean_delta - qt(0.975, df = n - 1) * sd_delta / sqrt(n),
+    ci_high    = mean_delta + qt(0.975, df = n - 1) * sd_delta / sqrt(n),
+    p_wilcoxon = wilcox.test(delta_AUC[!is.na(delta_AUC)],
+                              mu = 0, exact = FALSE)$p.value,
+    .groups    = "drop"
+  ) %>%
+  group_by(model) %>%
+  mutate(p_adj_fdr   = p.adjust(p_wilcoxon, method = "fdr"),
+         significant = p_adj_fdr < 0.05) %>%
+  ungroup()
+
+lofo_stat_summary %>%
+  arrange(model, mean_delta) %>%
+  mutate(across(c(mean_delta, sd_delta, ci_low, ci_high), ~ round(.x, 4)),
+         across(c(p_wilcoxon, p_adj_fdr), ~ signif(.x, 3))) %>%
+  print(n = Inf)
+
+write_csv(lofo_stat_summary,
+          here("outputs", "feature_ablation", "lofo_tvr_stat_summary.csv"))
+```
+
+## Ranked LOFO plot
+
+The most negative ΔAUC identifies the motif whose removal consistently hurts the TVR-only model the most, i.e. the one carrying the strongest non-redundant signal within this feature family. Motifs near zero are likely redundant with others: they contribute information, but that information is already captured by the remaining eight motifs.
+
+```{r lofo-plot, message=FALSE, warning=FALSE, fig.width=9, fig.height=5}
+p_lofo <- ggplot(lofo_stat_summary,
+                 aes(x = reorder(motif, mean_delta),
+                     y = mean_delta, colour = significant)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+  geom_pointrange(aes(ymin = ci_low, ymax = ci_high), size = 0.7) +
+  geom_text(aes(label = ifelse(significant, "*", ""),
+                y = ci_high + 0.003),
+            size = 4, show.legend = FALSE) +
+  facet_wrap(~model) +
+  coord_flip() +
+  scale_colour_manual(values = c("FALSE" = "grey55", "TRUE" = "#d73027"),
+                      labels = c("ns (FDR ≥ 0.05)", "FDR < 0.05")) +
+  labs(
+    title    = "TVR motif LOFO: ΔAUC relative to all-9-TVR baseline",
+    subtitle = "95% CI over 25 resamples (5-fold × 5-repeat); * = FDR < 0.05",
+    x        = "TVR motif removed",
+    y        = "Mean ΔAUC (8-motif model − all-TVR baseline)",
+    colour   = NULL
+  ) +
+  theme_bw(base_size = 11) +
+  theme(legend.position = "bottom")
+
+print(p_lofo)
+ggsave(here("outputs", "feature_ablation", "lofo_tvr_ranked.pdf"),
+       p_lofo, width = 9, height = 5)
+```
+
+```{r lofo-boxplot, message=FALSE, warning=FALSE, fig.width=10, fig.height=5}
+p_lofo_box <- ggplot(lofo_delta_df,
+                     aes(x = reorder(motif, delta_AUC, FUN = median),
+                         y = delta_AUC, fill = motif)) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+  geom_boxplot(outlier.size = 0.4, alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~model) +
+  coord_flip() +
+  scale_fill_brewer(palette = "Set3") +
+  labs(
+    title    = "Per-resample ΔAUC distribution for each TVR motif LOFO",
+    subtitle = "Baseline = all-9-TVR model; ordered by median ΔAUC",
+    x        = "TVR motif removed",
+    y        = "ΔAUC (8-motif model − all-TVR baseline)"
+  ) +
+  theme_bw(base_size = 11)
+
+print(p_lofo_box)
+ggsave(here("outputs", "feature_ablation", "lofo_tvr_distributions.pdf"),
+       p_lofo_box, width = 10, height = 5)
+```
+
+The TVR-only LOFO is the correct context for this ranking: when other strong features are included, they absorb most of the classification signal and per-motif ΔAUC becomes uninformatively small. By comparing 8-motif vs 9-motif TVR-only models on the larger ~1943-patient dataset, the analysis isolates the genuine within-family contribution of each motif. Motifs with near-zero ΔAUC should not be dismissed as uninformative; they are likely **redundant** representatives of the same biological signal, a point directly supported by the correlation structure in the next section.
+
+---
+
+# Redundancy Analysis
+
+A key reason why some individually biologically meaningful features may show weak or non-significant LOFO effects is **feature redundancy**: if two predictors carry correlated information, removing one is partially compensated for by the other. This section characterises the correlation structure of all numeric predictors in the full feature set to contextualise the ablation results.
+
+```{r redundancy-setup, message=FALSE, warning=FALSE}
+library(tidyverse)
+
+# Clean readable labels for every numeric feature
+feature_labels <- c(
+  tf_rate                 = "TF rate",
+  telomere_insertion_rate = "Tel. insertion",
+  telomere_content_log2   = "Tel. content (log2)",
+  TERT_FPKM               = "TERT FPKM",
+  ATAGGG_singleton_dist   = "ATAGGG",
+  CTAGGG_singleton_dist   = "CTAGGG",
+  GTAGGG_singleton_dist   = "GTAGGG",
+  TAAGGG_singleton_dist   = "TAAGGG",
+  TCAGGG_singleton_dist   = "TCAGGG",
+  TGAGGG_singleton_dist   = "TGAGGG",
+  TTCGGG_singleton_dist   = "TTCGGG",
+  TTGGGG_singleton_dist   = "TTGGGG",
+  TTTGGG_singleton_dist   = "TTTGGG"
+)
+
+numeric_vars <- model_data %>% select(where(is.numeric))
+
+cor_mat <- cor(numeric_vars, method = "spearman", use = "pairwise.complete.obs")
+
+# Tidy long-form correlation data frame
+cor_df <- cor_mat %>%
+  as.data.frame() %>%
+  rownames_to_column("var1") %>%
+  pivot_longer(-var1, names_to = "var2", values_to = "rho") %>%
+  mutate(
+    label1 = recode(var1, !!!feature_labels),
+    label2 = recode(var2, !!!feature_labels)
+  )
+```
+
+## Full correlation heatmap
+
+```{r corr-heatmap, message=FALSE, warning=FALSE, fig.width=9, fig.height=8}
+# Order variables: non-TVR first, then TVR motifs (clustered)
+var_order <- c(names(feature_labels)[1:4], names(feature_labels)[5:13])
+label_order <- feature_labels[var_order]
+
+cor_df_ordered <- cor_df %>%
+  mutate(
+    label1 = factor(label1, levels = label_order),
+    label2 = factor(label2, levels = rev(label_order))
+  )
+
+p_heatmap <- ggplot(cor_df_ordered, aes(x = label1, y = label2, fill = rho)) +
+  geom_tile(colour = "white", linewidth = 0.3) +
+  geom_text(aes(label = ifelse(abs(rho) >= 0.25 & var1 != var2,
+                               sprintf("%.2f", rho), "")),
+            size = 2.6, colour = "black") +
+  scale_fill_gradient2(
+    low      = "#4575b4",
+    mid      = "white",
+    high     = "#d73027",
+    midpoint = 0,
+    limits   = c(-1, 1),
+    name     = "Spearman ρ"
+  ) +
+  labs(
+    title    = "Spearman correlation matrix of numeric predictors",
+    subtitle = "Values shown for |ρ| ≥ 0.25",
+    x        = NULL,
+    y        = NULL
+  ) +
+  theme_bw(base_size = 11) +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1),
+    panel.grid  = element_blank()
+  )
+
+print(p_heatmap)
+ggsave(here("outputs", "feature_ablation", "correlation_heatmap_full.pdf"),
+       p_heatmap, width = 9, height = 8)
+```
+
+
+## Interpretation
+
+The feature ablation analyses consistently identify **telomere variant repeat (TVR) composition as the strongest predictive signal for ALT status** among the evaluated telomere-related feature groups. Removing all TVR motifs produced the largest and most consistent decrease in ROC-AUC across both Logistic Regression and Random Forest models, and this effect remained significant after FDR correction. This supports the interpretation that ALT tumors are characterised by a distinct telomeric sequence-composition state enriched for non-canonical telomere repeats.
+
+Among the remaining feature groups, **telomere insertion rate** showed the strongest independent contribution to classification performance. Its removal consistently reduced model performance in both model classes, suggesting that telomere insertion events capture non-redundant information associated with ALT-related genomic instability. This is biologically coherent with the proposed role of ALT in recombination-driven telomere remodeling and neo-telomere formation.
+
+In contrast, TERT expression, TF rate, and telomere content showed weak or non-significant ΔAUC changes when removed individually from the full model. Importantly, this **should not be interpreted as evidence that these variables are biologically irrelevant to ALT**. Rather, the results indicate that much of their predictive information is already represented by the broader telomeric instability and TVR composition features included in the model. In this context, the ablation analysis measures independent predictive contribution conditional on the remaining feature space, not absolute biological importance.
+
+The within-family TVR LOFO analysis further refined this interpretation. When evaluated in a TVR-only setting, the TVR signal was not distributed uniformly across motifs. Instead, a small subset of motifs (particularly **TTTGGG and TGAGGG**) accounted for most of the non-redundant predictive contribution within the TVR family, while removal of the remaining motifs produced little or no consistent AUC decrease. This pattern suggests that ALT-associated TVR composition is structured around a limited number of dominant motifs, whereas many additional motifs behave as partially redundant representatives of the same underlying telomeric remodeling process.
+
+Importantly, these findings are fully compatible with the enrichment and PCA-based analyses reported previously. PCA loadings and differential enrichment analyses identify motifs that co-vary with the global ALT state, whereas the present LOFO analyses quantify which motifs contribute unique predictive information once the broader compositional signature is already represented. Consequently, a motif may show strong ALT enrichment or large PCA loadings while still exhibiting a small LOFO ΔAUC if its information is highly correlated with that of other motifs.
+
+The redundancy analysis supports this interpretation. **Correlations among TVR motifs were generally weak-to-moderate** rather than extreme, suggesting partial overlap rather than complete interchangeability. This degree of correlation is nevertheless sufficient for machine-learning models to redistribute predictive weight across motifs, explaining why the TVR family collectively exerts a strong effect while many individual motifs show limited standalone contribution.
+
+Taken together, these analyses support a model in which ALT is associated not with isolated motif changes, but with a broader and coordinated telomeric compositional remodeling state. Within this state, a limited subset of motifs (particularly TTTGGG and TGAGGG) appears to capture the largest fraction of the non-redundant discriminatory signal, while telomere insertion rate provides an additional orthogonal marker of ALT-associated genomic instability.
+
+Finally, because repeated cross-validation resamples are partially overlapping and therefore not fully independent, the reported confidence intervals and p-values should be interpreted primarily as measures of resampling stability rather than formal population-level statistical inference.

@@ -783,5 +783,6 @@ missing_from_genes <- data_primary_genes %>%
 cat('Primary samples absent from genes dataset (n =', length(missing_from_genes), '):\n')
 print(missing_from_genes)
 
+library(writexl)
 write_xlsx(data_primary_genes, here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
 

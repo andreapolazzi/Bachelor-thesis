@@ -1,5 +1,5 @@
 ---
-title: "05_ALT_status_full"
+title: "02_ALT_status_full"
 author: 'Andrea Polazzi'
 date: '`r Sys.Date()`'
 output: html_document
@@ -45,7 +45,6 @@ We also keep a dataframe with all observation, thus **dropping the TERT_FPKM col
 model_data_large <- clean_data %>% select(-TERT_FPKM) %>% drop_na()
 ```
 
-
 # Correlation matrix
 
 ```{r corr-matrix}
@@ -65,12 +64,11 @@ corrplot::corrplot(
 )
 ```
 
-
 # PCA with all features
 
 ```{r PCA_full}
 X <- scale(model_data_full[, -1])
-pca <- prcomp(X, center = TRUE, scale. = TRUE)
+pca <- prcomp(X, center = TRUE)
 summary(pca)
 
 library(ggplot2)
@@ -92,6 +90,7 @@ ggplot(pca_df, aes(PC1, PC2, color = ALT)) +
 
 pca$rotation
 ```
+
 ## Biplot
 
 ```{r biplot}
@@ -210,177 +209,21 @@ ggplot(scores2, aes(PC1, PC2, color = ALT)) +
 ggsave(here('outputs', 'PCA_biplot_no_TERT.pdf'), width = 7, height = 6)
 ```
 
-
-# UMAP plot
-
-```{r umap}
-library(umap)
-
-umap_df <- clean_data %>% 
-  select(-donor_id) %>% 
-  drop_na() %>% 
-  mutate(cancer_type = factor(cancer_type))
-
-top_n_types <- 12
-top_types <- umap_df %>%
-  count(cancer_type) %>%
-  slice_max(n, n = top_n_types) %>%
-  pull(cancer_type)
-
-type_colors <- setNames(
-  c(scales::hue_pal()(top_n_types), "grey70"),
-  c(sort(top_types), "Other")
-)
-
-umap_vars <- umap_df %>%
-  select(where(is.numeric))
-
-umap_config <- umap.defaults
-umap_config$n_neighbors  <- 30
-umap_config$min_dist     <- 0.1
-umap_config$random_state <- 21
-
-umap_res <- umap(scale(umap_vars), config = umap_config)
-
-top_types_chr <- as.character(top_types)
-
-scores_umap <- as.data.frame(umap_res$layout) %>%
-  rename(UMAP1 = V1, UMAP2 = V2) %>%
-  mutate(
-    cancer_type_plot = ifelse(
-      as.character(umap_df$cancer_type) %in% top_types_chr,
-      as.character(umap_df$cancer_type),
-      "Other"
-    ),
-    cancer_type_plot = factor(cancer_type_plot,
-                              levels = c(sort(top_types_chr), "Other")),
-    ALT_status = umap_df$alt_status
-  )
-
-scores_umap_all <- scores_umap %>%
-  mutate(cancer_type_all = factor(as.character(umap_df$cancer_type)))
-
-library(RColorBrewer)
-
-n_types <- length(levels(scores_umap_all$cancer_type_all))
-
-type_colors_all <- setNames(
-  pals::polychrome(n_types),
-  levels(scores_umap_all$cancer_type_all)
-)
-
-type_colors <- setNames(
-  c(pals::polychrome(top_n_types), "grey70"),
-  c(sort(top_types_chr), "Other")
-)
-
-ggplot(scores_umap_all, aes(UMAP1, UMAP2, color = cancer_type_all)) +
-  geom_point(aes(shape = ALT_status,
-                 size  = ALT_status,
-                 alpha = ALT_status)) +
-  scale_shape_manual(values = c("ALT-low" = 16, "ALT-high" = 17)) +
-  scale_size_manual(values  = c("ALT-low" = 1.5, "ALT-high" = 3)) +
-  scale_alpha_manual(values = c("ALT-low" = 0.7, "ALT-high" = 1)) +
-  scale_color_manual(values = type_colors_all) +
-  theme_bw() +
-  labs(
-    title = "UMAP - PCAWG dataset, all cancer types",
-    x = "UMAP1", y = "UMAP2",
-    color = "Cancer type",
-    shape = "ALT status", size = "ALT status", alpha = "ALT status"
-  )
-
-ggplot(scores_umap, aes(UMAP1, UMAP2)) +
-  geom_point(
-    data = filter(scores_umap, cancer_type_plot == "Other"),
-    aes(color = cancer_type_plot, size = ALT_status),
-    shape = 16, alpha = 0.3
-  ) +
-  geom_point(
-    data = filter(scores_umap, cancer_type_plot != "Other"),
-    aes(color = cancer_type_plot, shape = ALT_status, size = ALT_status),
-    alpha = 0.7
-  ) +
-  scale_color_manual(values = type_colors) +
-  scale_shape_manual(values = c("ALT-low" = 16, "ALT-high" = 17)) +
-  scale_size_manual(values = c("ALT-low" = 1.5, "ALT-high" = 3)) +
-  theme_bw() +
-  labs(
-    title = "UMAP - PCAWG dataset",
-    x = "UMAP1", y = "UMAP2",
-    color = "Cancer type", shape = "ALT status", size = "ALT status"
-  )
-
-ggplot(scores_umap, aes(UMAP1, UMAP2)) +
-  geom_point(
-    data = filter(scores_umap, ALT_status == "ALT-low"),
-    color = "grey80", size = 1.2, alpha = 0.3, shape = 16
-  ) +
-  geom_point(
-    data = filter(scores_umap, ALT_status == "ALT-high"),
-    color = "#E41A1C", size = 2, alpha = 0.8, shape = 17
-  ) +
-  theme_bw() +
-  labs(
-    title = "UMAP - PCAWG dataset, ALT status highlighted",
-    x = "UMAP1", y = "UMAP2"
-  )
-
-library(purrr)
-
-params_grid <- expand.grid(
-  n_neighbors = c(10, 15, 30, 50),
-  min_dist    = c(0.05, 0.1, 0.5)
-)
-
-umap_plots <- pmap(params_grid, function(n_neighbors, min_dist) {
-  
-  cfg <- umap.defaults
-  cfg$n_neighbors  <- n_neighbors
-  cfg$min_dist     <- min_dist
-  cfg$random_state <- 21
-  
-  res <- umap(scale(umap_vars), config = cfg)
-  
-  as.data.frame(res$layout) %>%
-    rename(UMAP1 = V1, UMAP2 = V2) %>%
-    mutate(
-      ALT_status = umap_df$alt_status,
-      n_neighbors = n_neighbors,
-      min_dist    = min_dist
-    )
-})
-
-all_umaps <- bind_rows(umap_plots)
-
-ggplot(all_umaps, aes(UMAP1, UMAP2)) +
-  geom_point(
-    data = filter(all_umaps, ALT_status == "ALT-low"),
-    color = "grey80", size = 0.8, alpha = 0.3, shape = 16
-  ) +
-  geom_point(
-    data = filter(all_umaps, ALT_status == "ALT-high"),
-    color = "#E41A1C", size = 1.5, alpha = 0.9, shape = 17
-  ) +
-  facet_grid(min_dist ~ n_neighbors,
-             labeller = label_both) +
-  theme_bw(base_size = 9) +
-  labs(
-    title = "UMAP parameter sensitivity - ALT status",
-    x = "UMAP1", y = "UMAP2"
-  )
-```
-
 # Split the dataset
+
 ```{r train-test}
 set.seed(21)
-train_index <- sample(1:nrow(model_data_full), size = 0.5*nrow(model_data_full))
+train_index <- sample(1:nrow(model_data_full), size = 0.7*nrow(model_data_full))
 train <- model_data_full[train_index,]
 test <- model_data_full[-train_index,]
 ```
 
 # First classifier: Logistic Regression (all features)
+
 ```{r logreg-full, warning=FALSE}
+train$alt_status <- relevel(train$alt_status, ref = "ALT-low")
+test$alt_status  <- factor(test$alt_status, levels = levels(train$alt_status))
+
 logreg_model_full <- glm(alt_status~., data=train, family = 'binomial')
 
 prob <- predict(logreg_model_full, newdata = test, type = 'response')
@@ -405,7 +248,7 @@ auc(roc_obj_full)
 
 When the model is trained using the **full set of telomere-related variables** (TVR motifs, TERT expression, telomere fusion rate, telomere insertions, and telomere content), the ROC curve shows almost perfect separation between ALT-high and ALT-low tumors. The **AUC of 0.998** indicates **near-perfect discriminatory ability**, meaning the model can almost always rank ALT-high tumors above ALT-low ones. Compared with the TVR-only model, this represents a **dramatic improvement** in predictive performance.
 
-```{r pred-prob-distribution, warning=FALSE} 
+```{r pred-prob-distribution, warning=FALSE}
 prob_df <- data.frame(
   prob = prob,
   alt_status = test$alt_status
@@ -422,7 +265,6 @@ ggplot(prob_df, aes(x = prob, fill = alt_status)) +
     y = "Density"
   )
 ```
-
 
 ## Other metrics
 
@@ -490,7 +332,7 @@ varImpPlot(rf_model_full, main = 'Variable importance plot - Random Forest (all 
 
 # Cross Validation of the performances
 
-To assess the robustness of these two predictive models, we conducted **repeated stratified cross-validation**. 
+To assess the robustness of these two predictive models, we conducted **repeated stratified cross-validation**.
 
 ```{r metric-helper, message=FALSE, warning=FALSE}
 get_fold_metrics <- function(prob, truth, positive_class = "ALT-high", threshold = 0.5) {
@@ -564,8 +406,7 @@ for (r in 1:n_repeats) {
     fold_metrics <- get_fold_metrics(
       prob = logreg_cv_prob,
       truth = test_cv$alt_status,
-      positive_class = "ALT-high",
-      threshold = 0.3
+      positive_class = "ALT-high"
     ) %>%
       mutate(
         rep = r,
@@ -625,8 +466,7 @@ for (r in 1:n_repeats) {
     rf_cv_model <- randomForest(
       alt_status ~ .,
       data = train_cv,
-      ntree = 500,
-      mtry = 2
+      ntree = 500
     )
     
     rf_cv_prob <- predict(rf_cv_model, test_cv, type = "prob")[, "ALT-high"]
@@ -634,8 +474,7 @@ for (r in 1:n_repeats) {
     fold_metrics <- get_fold_metrics(
       prob = rf_cv_prob,
       truth = test_cv$alt_status,
-      positive_class = "ALT-high",
-      threshold = 0.3
+      positive_class = "ALT-high"
     ) %>%
       mutate(
         rep = r,
@@ -679,5 +518,3 @@ model_comparison <- all_results %>%
 
 model_comparison
 ```
-
-
