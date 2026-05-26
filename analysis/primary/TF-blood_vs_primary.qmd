@@ -75,8 +75,8 @@ clean_data %>%
 
 ```{r scatterplot-log1p}
 clean_data %>% 
-  ggplot(aes(log1p(tf_blood_rate), log1p(tf_primary_rate))) +
-  geom_point(alpha = 0.5, color = "darkred") +
+  ggplot(aes(log1p(tf_blood_rate), log1p(tf_primary_rate), color = alt_status)) +
+  geom_point(alpha = 0.5) +
   labs(title = "Scatterplot log1p(tf_blood_rate) vs log1p(tf_primary_rate)", x = "log1p(tf_blood_rate)", y = "log1p(tf_primary_rate)")
 ```
 
@@ -94,6 +94,89 @@ ggplot(clean_data, aes(x = as.factor(blood_pos), fill = as.factor(primary_pos)))
   geom_bar(position = "fill") +
   labs(title = "Proportion of signal presence between blood and primary", x = "blood_pos", y = "Proporzione") +
   scale_fill_manual(values = c("red", "green"), labels = c("0", "1"))
+```
+
+# Discordant samples: primary TF = 0, blood TF \> 0
+
+## Definition and ALT status enrichment
+
+```{r discordant-alt}
+# Samples with no detectable primary TF but positive blood TF
+discordant <- clean_data %>%
+  mutate(group = case_when(
+    primary_pos == 0 & blood_pos == 1 ~ "primary=0, blood>0",
+    primary_pos == 1 & blood_pos == 1 ~ "both>0",
+    primary_pos == 1 & blood_pos == 0 ~ "primary>0, blood=0",
+    TRUE ~ "both=0"
+  ))
+
+cat("Group counts:\n")
+print(table(discordant$group))
+
+# Focus on discordant group vs the rest (excluding both=0 as uninformative)
+disc_subset <- discordant %>%
+  filter(group %in% c("primary=0, blood>0", "both>0", "primary>0, blood=0")) %>%
+  mutate(is_discordant = group == "primary=0, blood>0")
+
+cat("\nALT status in discordant group (primary=0, blood>0):\n")
+print(table(discordant$alt_status[discordant$group == "primary=0, blood>0"]))
+
+cat("\nALT status in non-discordant groups:\n")
+print(table(discordant$alt_status[discordant$group != "primary=0, blood>0"]))
+
+# Fisher's exact test: is ALT-low enriched in discordant samples?
+ct <- table(disc_subset$is_discordant, disc_subset$alt_status)
+rownames(ct) <- c("other", "discordant")
+print(ct)
+fisher_res <- fisher.test(ct)
+cat("\nFisher's exact test (discordant vs other groups, ALT-low enrichment):\n")
+print(fisher_res)
+```
+
+## ALT status proportion plot
+
+```{r discordant-alt-plot}
+# Bar chart: ALT status proportions by group
+discordant %>%
+  filter(group != "both=0") %>%
+  ggplot(aes(x = group, fill = alt_status)) +
+  geom_bar(position = "fill") +
+  scale_fill_manual(values = c("ALT-high" = "#E74C3C", "ALT-low" = "#3498DB")) +
+  labs(
+    title = "ALT status proportion by TF signal group",
+    x = NULL, y = "Proportion", fill = "ALT status"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 20, hjust = 1))
+```
+
+## Discordant rate by cancer type
+
+```{r discordant-cancer-pct}
+disc_pct <- discordant %>%
+  group_by(cancer_type) %>%
+  summarise(
+    n_total  = n(),
+    n_disc   = sum(group == "primary=0, blood>0"),
+    pct_disc = n_disc / n_total * 100,
+    .groups  = "drop"
+  ) %>%
+  filter(n_total >= 10) %>%
+  arrange(desc(pct_disc))
+
+print(disc_pct)
+
+ggplot(disc_pct, aes(x = pct_disc, y = reorder(cancer_type, pct_disc))) +
+  geom_segment(aes(x = 0, xend = pct_disc,
+                   y = reorder(cancer_type, pct_disc),
+                   yend = reorder(cancer_type, pct_disc)),
+               color = "grey70") +
+  geom_point(size = 3, color = "#2C3E50") +
+  labs(
+    title = "Discordant rate by cancer type (primary=0, blood>0)",
+    x = "% discordant", y = NULL
+  ) +
+  theme_minimal()
 ```
 
 # Spearman correlation

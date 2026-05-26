@@ -1,0 +1,491 @@
+---
+title: "18_ALT_status_genes"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+---
+
+# Setup
+
+```{r setup}
+library(tidyverse)
+library(here)
+library(broom)
+library(lme4)
+library(patchwork)
+library(scales)
+
+# Helper: extract fixed-effect coefficients from a glmerMod / lmerMod model
+# (broom.mixed is not installed, so we replicate the broom::tidy output we need)
+tidy_fixef <- function(model, conf.int = FALSE, conf.level = 0.95) {
+  s <- summary(model)$coefficients
+  out <- tibble(
+    term = rownames(s),
+    estimate = s[, 'Estimate'],
+    std.error = s[, 'Std. Error'],
+    statistic = s[, grep('value', colnames(s))[1]],
+    p.value = if ('Pr(>|z|)' %in% colnames(s)) s[, 'Pr(>|z|)'] else NA_real_
+  )
+  if (conf.int) {
+    z <- qnorm(1 - (1 - conf.level) / 2)
+    out$conf.low  <- out$estimate - z * out$std.error
+    out$conf.high <- out$estimate + z * out$std.error
+  }
+  out
+}
+
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
+
+gene_cols <- c('ATRX_DAXX_trunc', 'TERT_mod', 'TSC2', 'MEN1', 'MET', 'KRAS', 'VHL')
+
+data <- data %>%
+  mutate(
+    across(all_of(gene_cols), as.logical),
+    alt_status = factor(alt_status, levels = c('ALT-low', 'ALT-high')),
+    cancer_group = factor(cancer_group),
+    cancer_type = factor(cancer_type)
+  )
+
+cat('Dataset:', nrow(data), 'patients,', ncol(data), 'columns\n')
+cat('ALT-high:', sum(data$alt_status == 'ALT-high'),
+    '| ALT-low:', sum(data$alt_status == 'ALT-low'), '\n')
+```
+
+This notebook explores whether the newly added gene mutation columns (`r paste(gene_cols, collapse=', ')`) carry independent signal for ALT classification and for the tTF/bTF regression tasks, beyond what is already explained by cancer type. The concern is confounding: these mutations are highly cancer-type specific.
+
+# Descriptive analysis
+
+## Mutation frequencies
+
+```{r freq-table}
+freq_tbl <- tibble(
+  gene = gene_cols,
+  n_TRUE = sapply(gene_cols, function(g) sum(data[[g]], na.rm = TRUE)),
+  n_FALSE = sapply(gene_cols, function(g) sum(!data[[g]], na.rm = TRUE)),
+  n_NA = sapply(gene_cols, function(g) sum(is.na(data[[g]]))),
+  pct_TRUE = round(100 * n_TRUE / (n_TRUE + n_FALSE), 2)
+)
+knitr::kable(freq_tbl, caption = 'Gene mutation frequencies')
+```
+
+`TSC2` (n=7) and `MET` (n=13) are too rare for stable estimation and will be flagged but not used as primary predictors.
+
+## Missingness pattern
+
+The 139 NAs occur jointly across all gene columns (same set of patients).
+
+```{r missingness}
+na_mask <- is.na(data[[gene_cols[1]]])
+cat('Patients with no gene annotation:', sum(na_mask), '\n')
+
+na_by_type <- data %>%
+  mutate(missing_genes = na_mask) %>%
+  group_by(cancer_type) %>%
+  summarise(n = n(), n_missing = sum(missing_genes),
+            pct_missing = round(100 * n_missing / n, 1)) %>%
+  filter(n_missing > 0) %>%
+  arrange(desc(pct_missing))
+knitr::kable(na_by_type, caption = 'Cancer types with missing gene annotations')
+```
+
+Missingness is non-random (MNAR): entire cancer types lack annotation. We will use complete-case analysis and run a sensitivity check imputing NAs as `FALSE` (the modal value for these types).
+
+## Mutation rates by cancer type
+
+```{r heatmap-by-type, fig.width=10, fig.height=6}
+mut_by_type <- data %>%
+  filter(!na_mask) %>%
+  group_by(cancer_type) %>%
+  summarise(across(all_of(gene_cols), ~ mean(., na.rm = TRUE)),
+            n = n()) %>%
+  pivot_longer(all_of(gene_cols), names_to = 'gene', values_to = 'rate') %>%
+  mutate(cancer_type = fct_reorder(cancer_type, n, .desc = TRUE))
+
+ggplot(mut_by_type, aes(gene, cancer_type, fill = rate)) +
+  geom_tile(color = 'white') +
+  geom_text(aes(label = ifelse(rate > 0, scales::percent(rate, accuracy = 0.1), '')),
+            size = 2.5) +
+  scale_fill_gradient(low = 'white', high = 'firebrick',
+                      labels = scales::percent) +
+  labs(title = 'Mutation rate by cancer type',
+       fill = 'Rate', x = NULL, y = NULL) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+The strong block structure confirms the confounding concern: most genes are concentrated in specific cancer types (KRAS in Panc/Colon/Lung, VHL in Kidney, MEN1 and ATRX/DAXX in Panc-Endocrine and other mesenchymal-origin types).
+
+## Mutation rates by cancer group
+
+```{r by-group}
+mut_by_group <- data %>%
+  filter(!na_mask) %>%
+  group_by(cancer_group) %>%
+  summarise(across(all_of(gene_cols), ~ round(100 * mean(., na.rm = TRUE), 2))) %>%
+  pivot_longer(all_of(gene_cols), names_to = 'gene', values_to = 'pct')
+
+ggplot(mut_by_group, aes(gene, pct, fill = cancer_group)) +
+  geom_col(position = 'dodge') +
+  geom_text(aes(label = paste0(pct, '%')),
+            position = position_dodge(width = 0.9), vjust = -0.3, size = 3) +
+  labs(title = 'Mutation rate by cancer_group',
+       y = '% mutated', x = NULL, fill = NULL) +
+  theme_minimal() +
+  theme(legend.position = 'bottom')
+```
+
+# Univariate associations with ALT status
+
+## Gene vs ALT (unadjusted)
+
+```{r fisher-alt}
+fisher_alt <- map_dfr(gene_cols, function(g) {
+  d <- data %>% filter(!is.na(.data[[g]]))
+  tbl <- table(d[[g]], d$alt_status)
+  if (any(dim(tbl) < 2)) return(NULL)
+  ft <- fisher.test(tbl)
+  pct_alt_high_mut <- mean(d$alt_status[d[[g]]] == 'ALT-high') * 100
+  pct_alt_high_wt  <- mean(d$alt_status[!d[[g]]] == 'ALT-high') * 100
+  tibble(
+    gene = g,
+    pct_ALT_high_if_mut = round(pct_alt_high_mut, 1),
+    pct_ALT_high_if_wt  = round(pct_alt_high_wt, 1),
+    OR_alt_high_vs_low  = round(1 / ft$estimate, 2),
+    p_value = ft$p.value
+  )
+}) %>%
+  mutate(p_adj_BH = p.adjust(p_value, method = 'BH'),
+         p_value = format.pval(p_value, digits = 2),
+         p_adj_BH = format.pval(p_adj_BH, digits = 2))
+
+knitr::kable(fisher_alt, caption = 'Fisher exact: gene mutation vs ALT status (OR reported for "mutation -> ALT-high")')
+```
+
+`ATRX_DAXX_trunc` and `MEN1` show the strongest enrichment in ALT-high (`r round(mean(data$alt_status[data$ATRX_DAXX_trunc & !is.na(data$ATRX_DAXX_trunc)] == 'ALT-high') * 100, 1)`% and `r round(mean(data$alt_status[data$MEN1 & !is.na(data$MEN1)] == 'ALT-high') * 100, 1)`% of mutants are ALT-high, respectively). `VHL`, `KRAS`, and `TERT_mod` mutants are predominantly ALT-low.
+
+## Gene vs cancer group (confounding check)
+
+```{r fisher-group}
+fisher_group <- map_dfr(gene_cols, function(g) {
+  d <- data %>% filter(!is.na(.data[[g]]))
+  tbl <- table(d[[g]], d$cancer_group)
+  if (any(dim(tbl) < 2)) return(NULL)
+  ft <- fisher.test(tbl)
+  tibble(gene = g,
+         p_value = ft$p.value)
+}) %>%
+  mutate(p_adj_BH = p.adjust(p_value, method = 'BH'),
+         p_value = format.pval(p_value, digits = 2),
+         p_adj_BH = format.pval(p_adj_BH, digits = 2))
+knitr::kable(fisher_group, caption = 'Fisher exact: gene mutation vs cancer_group')
+```
+
+Most genes are significantly associated with `cancer_group`. This confirms that the unadjusted gene–ALT signal is at risk of being confounded.
+
+# Adjusted models: do genes add information beyond cancer type?
+
+The core question. We fit logistic regression with `cancer_group` as a covariate, then add each gene one at a time and test for improvement via a likelihood ratio test. We restrict to genes with prevalence ≥ 20 mutated cases to ensure stable estimation.
+
+```{r select-genes}
+genes_used <- freq_tbl %>%
+  filter(n_TRUE >= 20) %>%
+  pull(gene)
+
+cat('Genes used in adjusted models (n_TRUE >= 20):',
+    paste(genes_used, collapse = ', '), '\n')
+```
+
+## Adjusted by `cancer_group`
+
+```{r lrt-cancer-group}
+d_cc <- data %>% filter(!na_mask)
+
+lrt_group <- map_dfr(genes_used, function(g) {
+  m0 <- glm(alt_status ~ cancer_group, data = d_cc, family = binomial)
+  fm <- as.formula(paste0('alt_status ~ cancer_group + ', g))
+  m1 <- glm(fm, data = d_cc, family = binomial)
+  lr <- anova(m0, m1, test = 'LRT')
+  coef <- tidy(m1) %>% filter(term == paste0(g, 'TRUE'))
+  tibble(
+    gene = g,
+    logOR_adj = round(coef$estimate, 2),
+    OR_adj = round(exp(coef$estimate), 2),
+    SE = round(coef$std.error, 2),
+    LRT_chisq = round(lr$Deviance[2], 2),
+    LRT_p = lr$`Pr(>Chi)`[2]
+  )
+}) %>%
+  mutate(LRT_p_adj_BH = p.adjust(LRT_p, method = 'BH'),
+         LRT_p = format.pval(LRT_p, digits = 2),
+         LRT_p_adj_BH = format.pval(LRT_p_adj_BH, digits = 2))
+knitr::kable(lrt_group,
+             caption = 'LRT vs baseline (cancer_group only). OR_adj is for gene = TRUE.')
+```
+
+## Adjusted by `cancer_type` (mixed effects)
+
+`cancer_type` has 33 levels — too many for fixed effects with sparse cells. We use it as a random intercept.
+
+```{r lrt-mixed}
+lrt_mixed <- map_dfr(genes_used, function(g) {
+  m0 <- glmer(alt_status ~ (1 | cancer_type), data = d_cc, family = binomial,
+              control = glmerControl(optimizer = 'bobyqa'))
+  fm <- as.formula(paste0('alt_status ~ ', g, ' + (1 | cancer_type)'))
+  m1 <- glmer(fm, data = d_cc, family = binomial,
+              control = glmerControl(optimizer = 'bobyqa'))
+  lr <- anova(m0, m1, test = 'LRT')
+  coef <- tidy_fixef(m1) %>% filter(term == paste0(g, 'TRUE'))
+  tibble(
+    gene = g,
+    logOR_adj = round(coef$estimate, 2),
+    OR_adj = round(exp(coef$estimate), 2),
+    SE = round(coef$std.error, 2),
+    LRT_chisq = round(lr$Chisq[2], 2),
+    LRT_p = lr$`Pr(>Chisq)`[2]
+  )
+}) %>%
+  mutate(LRT_p_adj_BH = p.adjust(LRT_p, method = 'BH'),
+         LRT_p = format.pval(LRT_p, digits = 2),
+         LRT_p_adj_BH = format.pval(LRT_p_adj_BH, digits = 2))
+knitr::kable(lrt_mixed,
+             caption = 'LRT vs baseline (random intercept for cancer_type). OR_adj is for gene = TRUE.')
+```
+
+If a gene remains significant after the cancer_type random effect, the signal is unlikely to be a mere consequence of cancer-type composition.
+
+## Joint multivariate model
+
+We fit a model with all viable genes simultaneously, adjusting for `cancer_type` as random effect:
+
+```{r joint-model}
+joint_formula <- as.formula(
+  paste0('alt_status ~ ', paste(genes_used, collapse = ' + '),
+         ' + (1 | cancer_type)')
+)
+m_joint <- glmer(joint_formula, data = d_cc, family = binomial,
+                 control = glmerControl(optimizer = 'bobyqa'))
+
+joint_tbl <- tidy_fixef(m_joint, conf.int = TRUE) %>%
+  filter(term != '(Intercept)') %>%
+  mutate(OR = exp(estimate),
+         OR_lo = exp(conf.low),
+         OR_hi = exp(conf.high),
+         p.value = format.pval(p.value, digits = 2)) %>%
+  select(term, estimate, OR, OR_lo, OR_hi, p.value)
+knitr::kable(joint_tbl, digits = 2,
+             caption = 'Joint multivariate model: all viable genes + cancer_type random effect')
+```
+
+```{r forest-plot, fig.width=7, fig.height=3.5}
+fp <- tidy_fixef(m_joint, conf.int = TRUE) %>%
+  filter(term != '(Intercept)') %>%
+  mutate(term = str_remove(term, 'TRUE$'),
+         OR = exp(estimate),
+         OR_lo = exp(conf.low),
+         OR_hi = exp(conf.high))
+
+ggplot(fp, aes(OR, fct_reorder(term, OR))) +
+  geom_vline(xintercept = 1, linetype = 'dashed', color = 'grey50') +
+  geom_pointrange(aes(xmin = OR_lo, xmax = OR_hi)) +
+  scale_x_log10() +
+  labs(title = 'Adjusted odds ratios for ALT-high',
+       subtitle = 'Joint model with cancer_type random effect',
+       x = 'OR (log scale)', y = NULL) +
+  theme_bw()
+```
+
+# Stratified analysis
+
+Does the gene signal hold within each cancer group? If a mutation predicts ALT only because of cancer-type composition, the within-group association would disappear.
+
+```{r stratified}
+stratified <- map_dfr(genes_used, function(g) {
+  map_dfr(levels(d_cc$cancer_group), function(grp) {
+    sub <- d_cc %>% filter(cancer_group == grp)
+    tbl <- table(sub[[g]], sub$alt_status)
+    if (any(dim(tbl) < 2) || min(rowSums(tbl)) < 5) {
+      return(tibble(gene = g, group = grp,
+                    n_mutant = sum(sub[[g]], na.rm = TRUE),
+                    pct_ALT_high_mut = NA_real_,
+                    pct_ALT_high_wt = NA_real_,
+                    p_value = NA_real_))
+    }
+    ft <- fisher.test(tbl)
+    tibble(
+      gene = g, group = grp,
+      n_mutant = sum(sub[[g]], na.rm = TRUE),
+      pct_ALT_high_mut = round(100 * mean(sub$alt_status[sub[[g]]] == 'ALT-high'), 1),
+      pct_ALT_high_wt  = round(100 * mean(sub$alt_status[!sub[[g]]] == 'ALT-high'), 1),
+      p_value = ft$p.value
+    )
+  })
+}) %>%
+  mutate(p_value = ifelse(is.na(p_value), NA, format.pval(p_value, digits = 2)))
+
+knitr::kable(stratified,
+             caption = 'Stratified Fisher tests within each cancer_group')
+```
+
+# Sensitivity: impute NA as FALSE
+
+The 139 missing patients come from cancer types where mutation rates are essentially zero in the observed cohort. Treating their NAs as FALSE gives an alternative analysis on the full sample.
+
+```{r sensitivity}
+d_imp <- data %>%
+  mutate(across(all_of(gene_cols), ~ replace_na(., FALSE)))
+
+sens <- map_dfr(genes_used, function(g) {
+  m0 <- glm(alt_status ~ cancer_group, data = d_imp, family = binomial)
+  fm <- as.formula(paste0('alt_status ~ cancer_group + ', g))
+  m1 <- glm(fm, data = d_imp, family = binomial)
+  lr <- anova(m0, m1, test = 'LRT')
+  coef <- tidy(m1) %>% filter(term == paste0(g, 'TRUE'))
+  tibble(
+    gene = g,
+    OR_adj = round(exp(coef$estimate), 2),
+    LRT_p = lr$`Pr(>Chi)`[2]
+  )
+}) %>%
+  mutate(LRT_p_adj_BH = p.adjust(LRT_p, method = 'BH'),
+         LRT_p = format.pval(LRT_p, digits = 2),
+         LRT_p_adj_BH = format.pval(LRT_p_adj_BH, digits = 2))
+
+knitr::kable(sens, caption = 'Sensitivity: NA imputed as FALSE')
+```
+
+If the gene–ALT effects largely match the complete-case results, the missingness is not driving the inference.
+
+# Genes added to the full ALT classifier
+
+We now add genes on top of the established feature set used in earlier notebooks (telomere features + TVRs) to test whether they add predictive value beyond what those features already capture, while still adjusting for cancer group.
+
+```{r alt-full}
+base_features <- c('tf_primary_rate', 'tf_blood_rate', 'telomere_insertion_rate',
+                   'telomere_content_log2',
+                   grep('_singleton_dist$', colnames(data), value = TRUE))
+
+d_full <- data %>%
+  filter(!na_mask) %>%
+  drop_na(any_of(base_features)) %>%
+  mutate(tf_primary_rate = log1p(tf_primary_rate),
+         tf_blood_rate = log1p(tf_blood_rate),
+         telomere_insertion_rate = log1p(telomere_insertion_rate))
+
+base_formula <- as.formula(
+  paste0('alt_status ~ cancer_group + ', paste(base_features, collapse = ' + '))
+)
+gene_formula <- as.formula(
+  paste0('alt_status ~ cancer_group + ',
+         paste(base_features, collapse = ' + '), ' + ',
+         paste(genes_used, collapse = ' + '))
+)
+
+m_base <- glm(base_formula, data = d_full, family = binomial)
+m_gene <- glm(gene_formula, data = d_full, family = binomial)
+lr_full <- anova(m_base, m_gene, test = 'LRT')
+
+cat('Base model AIC:', round(AIC(m_base), 2), '\n')
+cat('Gene-augmented AIC:', round(AIC(m_gene), 2), '\n')
+cat('LRT chi-sq:', round(lr_full$Deviance[2], 2),
+    'on', lr_full$Df[2], 'df, p =',
+    format.pval(lr_full$`Pr(>Chi)`[2], digits = 3), '\n')
+
+gene_coefs <- tidy(m_gene, conf.int = TRUE) %>%
+  filter(term %in% paste0(genes_used, 'TRUE')) %>%
+  mutate(OR = round(exp(estimate), 2),
+         OR_lo = round(exp(conf.low), 2),
+         OR_hi = round(exp(conf.high), 2),
+         p.value = format.pval(p.value, digits = 2)) %>%
+  select(term, OR, OR_lo, OR_hi, p.value)
+knitr::kable(gene_coefs,
+             caption = 'Gene coefficients in the full classifier (adjusted for cancer_group + telomere features)')
+```
+
+# Genes added to tTF and bTF regression
+
+Same logic: take the established regression setup, log1p the outcome, control for `cancer_group`, and test gene addition by LRT/F-test.
+
+```{r ttf-btf}
+fit_regression <- function(outcome, data, genes_used, base_features) {
+  data <- data %>%
+    mutate(!!outcome := log1p(.data[[outcome]]))
+
+  feats <- setdiff(base_features, outcome)
+
+  base_formula <- as.formula(
+    paste0(outcome, ' ~ cancer_group + ', paste(feats, collapse = ' + '))
+  )
+  gene_formula <- as.formula(
+    paste0(outcome, ' ~ cancer_group + ',
+           paste(feats, collapse = ' + '), ' + ',
+           paste(genes_used, collapse = ' + '))
+  )
+
+  m_base <- lm(base_formula, data = data)
+  m_gene <- lm(gene_formula, data = data)
+  list(base = m_base, gene = m_gene, anova = anova(m_base, m_gene))
+}
+
+reg_features <- c('telomere_insertion_rate', 'telomere_content_log2',
+                  grep('_singleton_dist$', colnames(data), value = TRUE))
+
+d_reg <- data %>%
+  filter(!na_mask) %>%
+  drop_na(any_of(c('tf_primary_rate', 'tf_blood_rate', reg_features))) %>%
+  mutate(telomere_insertion_rate = log1p(telomere_insertion_rate))
+```
+
+## tTF regression
+
+```{r ttf}
+ttf_fit <- fit_regression('tf_primary_rate', d_reg, genes_used,
+                          c(reg_features, 'tf_blood_rate'))
+cat('Base R^2:', round(summary(ttf_fit$base)$r.squared, 3),
+    '| Gene-augmented R^2:', round(summary(ttf_fit$gene)$r.squared, 3), '\n')
+print(ttf_fit$anova)
+
+ttf_coefs <- tidy(ttf_fit$gene, conf.int = TRUE) %>%
+  filter(term %in% paste0(genes_used, 'TRUE')) %>%
+  mutate(estimate = round(estimate, 3),
+         conf.low = round(conf.low, 3),
+         conf.high = round(conf.high, 3),
+         p.value = format.pval(p.value, digits = 2)) %>%
+  select(term, estimate, conf.low, conf.high, p.value)
+knitr::kable(ttf_coefs,
+             caption = 'Gene coefficients (effect on log1p(tf_primary_rate))')
+```
+
+## bTF regression
+
+```{r btf}
+btf_fit <- fit_regression('tf_blood_rate', d_reg, genes_used,
+                          c(reg_features, 'tf_primary_rate'))
+cat('Base R^2:', round(summary(btf_fit$base)$r.squared, 3),
+    '| Gene-augmented R^2:', round(summary(btf_fit$gene)$r.squared, 3), '\n')
+print(btf_fit$anova)
+
+btf_coefs <- tidy(btf_fit$gene, conf.int = TRUE) %>%
+  filter(term %in% paste0(genes_used, 'TRUE')) %>%
+  mutate(estimate = round(estimate, 3),
+         conf.low = round(conf.low, 3),
+         conf.high = round(conf.high, 3),
+         p.value = format.pval(p.value, digits = 2)) %>%
+  select(term, estimate, conf.low, conf.high, p.value)
+knitr::kable(btf_coefs,
+             caption = 'Gene coefficients (effect on log1p(tf_blood_rate))')
+```
+
+# Summary
+
+- The seven gene columns are highly cancer-type specific, making naive inclusion confounded.
+- Only `ATRX_DAXX_trunc`, `TERT_mod`, `MEN1`, `KRAS`, and `VHL` reach the n≥20 prevalence threshold for stable estimation; `TSC2` and `MET` are excluded.
+- After adjusting for `cancer_group` and the stricter `cancer_type` random effect, the LRT and joint-model tables above identify which genes carry signal *independent* of cancer composition. Those are the defensible candidates to include in downstream ALT classifiers and TF regression models.
+- The stratified analysis indicates within which subset (mesenchymal vs non-mesenchymal) each effect is detectable, guiding biologically grounded interpretation.
+- The sensitivity analysis (NA → FALSE) confirms whether the conclusions are robust to the MNAR missingness in the 139 patients without gene annotation.

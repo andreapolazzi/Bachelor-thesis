@@ -28,9 +28,9 @@ summary(model_data)
 
 The previous analyses (PCA, Random Forest, feature ablation) identified a set of predictors relevant to ALT-high/ALT-low classification, but using methods that do not provide formal effect size estimates or automatic variable selection. LASSO-penalized logistic regression instead does:
 
-- **automatic variable selection** via shrinkage of coefficients to zero
-- **effect sizes on a common scale** when predictors are pre-standardized
-- **regularization** that reduces overfitting, particularly useful in the presence of correlated predictors (such as TVR motifs)
+-   **automatic variable selection** via shrinkage of coefficients to zero
+-   **effect sizes on a common scale** when predictors are pre-standardized
+-   **regularization** that reduces overfitting, particularly useful in the presence of correlated predictors (such as TVR motifs)
 
 # Data preparation
 
@@ -51,8 +51,8 @@ table(y, dnn = "ALT status")
 
 We use `cv.glmnet` with 10 folds and `alpha = 1` (pure LASSO). The optimized metric is binomial deviance. We evaluate two standard thresholds:
 
-- **`lambda.min`**: λ minimizing CV error — richer model, maximum predictive performance
-- **`lambda.1se`**: λ within 1 SE of the minimum — more parsimonious model, preferable for biological interpretation
+-   **`lambda.min`**: λ minimizing CV error — richer model, maximum predictive performance
+-   **`lambda.1se`**: λ within 1 SE of the minimum — more parsimonious model, preferable for biological interpretation
 
 ```{r cv-lasso}
 set.seed(21)
@@ -136,25 +136,6 @@ Both lambda values agree on the majority of predictors, apart from the TVR motif
 
 **Telomere insertion** confirmes itself again as a **strong predictor**.
 
-# Distribution of `telomere_insertion_rate`
-
-The large coefficient of `telomere_insertion_rate` suggests very strong class separation. We visualize its distribution to assess whether near-perfect separation is occurring, which would cause coefficient inflation even after regularization.
-
-```{r tel-ins-distribution}
-ggplot(model_data, aes(x = alt_status, y = telomere_insertion_rate, fill = alt_status)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
-  geom_jitter(width = 0.15, alpha = 0.35, size = 1) +
-  theme_bw() +
-  labs(
-    x     = NULL,
-    y     = "Telomere insertion rate",
-    title = "Distribution of telomere_insertion_rate by ALT status"
-  ) +
-  theme(legend.position = "none")
-```
-
-The boxplot shows that **ALT-low samples are tightly concentrated near zero**, while **ALT-high samples have substantially higher and more variable values**, extending well above 1. There is minimal overlap between the main distributions, indicating **strong separation** between groups based on this feature.
-
 # Predictive performance
 
 We evaluate the LASSO model with `lambda.1se` via ROC/AUC. Since CV was already performed for λ selection, we use the out-of-fold predictions stored in `cv_fit$fit.preval` for an unbiased performance estimate. Using these instead of refitting on the full dataset avoids the optimistic bias that would arise from evaluating on training data.
@@ -178,7 +159,7 @@ plot(roc_lasso,
 cat("AUC (out-of-fold, lambda.1se):", round(auc(roc_lasso), 4), "\n")
 ```
 
-The ROC curve rises sharply, achieving **high sensitivity** at **near-perfect specificity**. This indicates strong discriminative performance, with the model accurately separating ALT-high from ALT-low samples based on predicted probabilities. The **AUC value is 0.9828**. 
+The ROC curve rises sharply, achieving **high sensitivity** at **near-perfect specificity**. This indicates strong discriminative performance, with the model accurately separating ALT-high from ALT-low samples based on predicted probabilities. The **AUC value is 0.9828**.
 
 # Post-selection refitting
 
@@ -242,4 +223,3 @@ knitr::kable(
   caption   = "Variables selected by LASSO (lambda.1se) with standardized coefficients and direction of association with ALT status."
 )
 ```
-

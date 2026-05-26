@@ -1,6 +1,5 @@
 # =============================================================
 # Group comparison: Mesenchymal_origin vs Non-Mesenchymal_origin
-# Exploratory only — n_mes = 42, n_nonmes = 774
 # =============================================================
 
 library(tidyverse)
@@ -10,6 +9,7 @@ library(effsize)   # for Cliff's delta
 
 data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 clean_data <- data %>% 
+  select(-TERT_FPKM) %>%    # remove this line to include TERT but lose sample size (n=1942 vs n=816)
   drop_na() %>% 
   filter(tf_primary_rate<10)
 
@@ -20,7 +20,6 @@ clean_data_orig <- clean_data %>%
   mutate(
     tf_blood_rate = log1p(tf_blood_rate),
     telomere_insertion_rate = log1p(telomere_insertion_rate),
-    TERT_FPKM = log1p(TERT_FPKM),
     alt_status = factor(
       alt_status,
       levels = c("ALT-low", "ALT-high")
@@ -33,7 +32,6 @@ clean_data <- clean_data %>%
     tf_primary_rate = log1p(tf_primary_rate),
     tf_blood_rate = log1p(tf_blood_rate),
     telomere_insertion_rate = log1p(telomere_insertion_rate),
-    TERT_FPKM = log1p(TERT_FPKM),
     alt_status = factor(
       alt_status,
       levels = c("ALT-low", "ALT-high")

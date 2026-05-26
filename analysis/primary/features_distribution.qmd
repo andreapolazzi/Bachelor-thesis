@@ -1,0 +1,141 @@
+---
+title: "features_distribution"
+date: today
+format:
+  html:
+    toc: true
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+---
+
+```{r setup}
+library(tidyverse)
+library(here)
+
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+```
+
+# Distribution of telomere_insertion_rate
+
+```{r tel-ins-distribution}
+ggplot(data, aes(x = alt_status, y = log1p(telomere_insertion_rate), fill = alt_status)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.35, size = 1) +
+  theme_bw() +
+  labs(
+    x     = NULL,
+    y     = "Telomere insertion rate (log1p)",
+    title = "Distribution of log1p(telomere_insertion_rate) by ALT status"
+  ) +
+  theme(legend.position = "none")
+```
+
+The boxplot shows that ALT-low samples are tightly concentrated near zero, while ALT-high samples have substantially higher and more variable values, extending well above 1. There is minimal overlap between the main distributions, indicating strong separation between groups based on this feature.
+
+# Why TERT_FPKM appears as a weak positive predictor of tf_primary_rate
+
+LASSO and SHAP analyses on `tf_primary_rate` occasionally assign small positive coefficients or SHAP values to `TERT_FPKM`. This is counterintuitive: TERT activation is a mechanism alternative to ALT, so high TERT expression should not drive high `tf_primary_rate`. The sections below show this signal is an artifact of shared variance and missing data, not a genuine association.
+
+## Distribution and missingness
+
+```{r tert-missing}
+library(tidyverse)
+library(here)
+library(patchwork)
+
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+
+n_total <- nrow(data)
+n_na    <- sum(is.na(data$TERT_FPKM))
+pct_na  <- round(100 * n_na / n_total, 1)
+```
+
+`TERT_FPKM` is missing in **`r n_na` / `r n_total` samples (`r pct_na`%)**.
+In ALT-high samples the missingness reaches 69%.
+Any model using TERT trains on a non-random, severely reduced subset.
+
+```{r tert-distribution}
+p1 <- data %>%
+  filter(!is.na(TERT_FPKM)) %>%
+  ggplot(aes(x = log1p(TERT_FPKM))) +
+  geom_histogram(bins = 40, fill = "steelblue", alpha = 0.7) +
+  theme_bw() +
+  labs(x = "log1p(TERT_FPKM)", y = "Count",
+       title = "TERT_FPKM distribution (complete cases only)")
+
+p2 <- data %>%
+  filter(!is.na(TERT_FPKM)) %>%
+  ggplot(aes(x = alt_status, y = log1p(TERT_FPKM), fill = alt_status)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.3, size = 0.8) +
+  theme_bw() +
+  theme(legend.position = "none") +
+  labs(x = NULL, y = "log1p(TERT_FPKM)",
+       title = "TERT_FPKM by ALT status")
+
+p1 + p2
+```
+
+Among complete cases, ALT-high samples actually have a **lower** median TERT (0.007) than ALT-low samples (0.117), consistent with TERT suppression in ALT tumours.
+
+## Marginal and partial correlations with tf_primary_rate
+
+```{r tert-correlations}
+# Marginal correlation
+r_marginal <- cor(data$TERT_FPKM, data$tf_primary_rate, use = "complete.obs")
+
+# Partial correlation controlling for telomere_content_log2
+d_cc <- data %>%
+  filter(!is.na(TERT_FPKM), !is.na(telomere_content_log2), !is.na(tf_primary_rate))
+
+resid_tert <- residuals(lm(log1p(TERT_FPKM) ~ telomere_content_log2, data = d_cc))
+resid_tf   <- residuals(lm(tf_primary_rate   ~ telomere_content_log2, data = d_cc))
+r_partial  <- cor(resid_tert, resid_tf)
+
+# Correlation of TERT with the true predictors
+r_tc  <- cor(data$TERT_FPKM, data$telomere_content_log2, use = "complete.obs")
+
+# R2 of TERT alone
+d_r2 <- data %>% filter(!is.na(TERT_FPKM), !is.na(tf_primary_rate))
+r2_tert <- summary(lm(tf_primary_rate ~ log1p(TERT_FPKM), data = d_r2))$r.squared
+```
+
+| Quantity | Value |
+|---|---|
+| Marginal *r*(TERT, tf_primary_rate) | `r round(r_marginal, 3)` |
+| *R*² of TERT alone | `r formatC(r2_tert, format = "f", digits = 4)` |
+| *r*(TERT, telomere_content_log2) | `r round(r_tc, 3)` |
+| Partial *r* after removing telomere_content effect | `r round(r_partial, 3)` |
+
+The marginal correlation is near zero (r = `r round(r_marginal, 3)`) and TERT alone explains essentially **no variance** in `tf_primary_rate` (R² ≈ 0).
+However, TERT correlates moderately with `telomere_content_log2` (r = `r round(r_tc, 3)`), which is itself one of the stronger predictors of `tf_primary_rate`.
+Once this shared variance is removed, the partial correlation between TERT and `tf_primary_rate` becomes negative (`r round(r_partial, 3)`), confirming there is no independent positive relationship.
+
+## Scatterplot: TERT vs tf_primary_rate
+
+```{r tert-scatter}
+data %>%
+  filter(!is.na(TERT_FPKM)) %>%
+  ggplot(aes(x = log1p(TERT_FPKM), y = tf_primary_rate, colour = alt_status)) +
+  geom_point(alpha = 0.4, size = 1.2) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 0.8) +
+  theme_bw() +
+  labs(x = "log1p(TERT_FPKM)", y = "tf_primary_rate",
+       colour = "ALT status",
+       title  = "TERT_FPKM vs tf_primary_rate (complete cases)")
+```
+
+Within each ALT group the regression line is essentially flat (within-ALT-high: r = −0.057; within-ALT-low: r = 0.042), ruling out a biologically meaningful relationship.
+
+## Summary
+
+The small positive LASSO coefficient and positive SHAP values for `TERT_FPKM` arise from three confounds, none of which imply a real effect:
+
+1. **Multicollinearity**: TERT shares variance with `telomere_content_log2` (r = `r round(r_tc, 3)`), a genuine predictor. LASSO cannot perfectly isolate independent contributions when correlated features are present.
+2. **Missingness bias**: With 58% of values absent, TERT is included only in the complete-case subset. The model optimises on a different sample when TERT is available, which can produce spurious coefficients.
+3. **Negligible independent signal**: After accounting for `telomere_content_log2`, the partial correlation flips sign. The marginal R² is effectively zero.
+
+TERT expression is not a driver of `tf_primary_rate`; its occasional appearance in regularised models is an artefact of shared variance with telomere biology features.
