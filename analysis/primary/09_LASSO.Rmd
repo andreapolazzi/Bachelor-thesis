@@ -1,5 +1,5 @@
 ---
-title: "11_LASSO_ALT_status"
+title: "09_LASSO"
 author: "Andrea Polazzi"
 date: "`r Sys.Date()`"
 output: html_document
@@ -189,11 +189,8 @@ LASSO coefficients are biased toward zero by construction and cannot be used as 
 selected <- coef_df %>%
   filter(selected_1se) %>%
   pull(feature) %>%
-  gsub("ATAGGG", "ATAGGG_singleton_dist", .) %>%
-  gsub("TAAGGG", "TAAGGG_singleton_dist", .) %>%
-  gsub("TCAGGG", "TCAGGG_singleton_dist", .) %>%
-  gsub("TGAGGG", "TGAGGG_singleton_dist", .) %>%
-  gsub("TTTGGG", "TTTGGG_singleton_dist", .)
+  gsub("^(ATAGGG|GTAGGG|TAAGGG|TCAGGG|TGAGGG|TTCGGG|TTTGGG)$",
+       "\\1_singleton_dist", .)
 
 cat("Variables selected by lambda.1se:\n")
 print(selected)

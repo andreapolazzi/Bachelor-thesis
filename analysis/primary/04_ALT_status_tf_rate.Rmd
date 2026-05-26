@@ -382,5 +382,3 @@ model_comparison <- all_results %>%
 
 model_comparison
 ```
-
-These results confirm the **robustness of the AUC values previously recorded** for the two models, and agree with the fact that allowing non-linear relationships among features (i.e. using Random Forest) provides additional classification power.
