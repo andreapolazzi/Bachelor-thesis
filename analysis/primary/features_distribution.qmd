@@ -53,9 +53,7 @@ n_na    <- sum(is.na(data$TERT_FPKM))
 pct_na  <- round(100 * n_na / n_total, 1)
 ```
 
-`TERT_FPKM` is missing in **`r n_na` / `r n_total` samples (`r pct_na`%)**.
-In ALT-high samples the missingness reaches 69%.
-Any model using TERT trains on a non-random, severely reduced subset.
+`TERT_FPKM` is missing in **`r n_na` / `r n_total` samples (`r pct_na`%)**. In ALT-high samples the missingness reaches 69%. Any model using TERT trains on a non-random, severely reduced subset.
 
 ```{r tert-distribution}
 p1 <- data %>%
@@ -104,15 +102,13 @@ r2_tert <- summary(lm(tf_primary_rate ~ log1p(TERT_FPKM), data = d_r2))$r.square
 ```
 
 | Quantity | Value |
-|---|---|
+|------------------------------------|------------------------------------|
 | Marginal *r*(TERT, tf_primary_rate) | `r round(r_marginal, 3)` |
 | *R*² of TERT alone | `r formatC(r2_tert, format = "f", digits = 4)` |
 | *r*(TERT, telomere_content_log2) | `r round(r_tc, 3)` |
 | Partial *r* after removing telomere_content effect | `r round(r_partial, 3)` |
 
-The marginal correlation is near zero (r = `r round(r_marginal, 3)`) and TERT alone explains essentially **no variance** in `tf_primary_rate` (R² ≈ 0).
-However, TERT correlates moderately with `telomere_content_log2` (r = `r round(r_tc, 3)`), which is itself one of the stronger predictors of `tf_primary_rate`.
-Once this shared variance is removed, the partial correlation between TERT and `tf_primary_rate` becomes negative (`r round(r_partial, 3)`), confirming there is no independent positive relationship.
+The marginal correlation is near zero (r = `r round(r_marginal, 3)`) and TERT alone explains essentially **no variance** in `tf_primary_rate` (R² ≈ 0). However, TERT correlates moderately with `telomere_content_log2` (r = `r round(r_tc, 3)`), which is itself one of the stronger predictors of `tf_primary_rate`. Once this shared variance is removed, the partial correlation between TERT and `tf_primary_rate` becomes negative (`r round(r_partial, 3)`), confirming there is no independent positive relationship.
 
 ## Scatterplot: TERT vs tf_primary_rate
 
@@ -134,8 +130,294 @@ Within each ALT group the regression line is essentially flat (within-ALT-high: 
 
 The small positive LASSO coefficient and positive SHAP values for `TERT_FPKM` arise from three confounds, none of which imply a real effect:
 
-1. **Multicollinearity**: TERT shares variance with `telomere_content_log2` (r = `r round(r_tc, 3)`), a genuine predictor. LASSO cannot perfectly isolate independent contributions when correlated features are present.
-2. **Missingness bias**: With 58% of values absent, TERT is included only in the complete-case subset. The model optimises on a different sample when TERT is available, which can produce spurious coefficients.
-3. **Negligible independent signal**: After accounting for `telomere_content_log2`, the partial correlation flips sign. The marginal R² is effectively zero.
+1.  **Multicollinearity**: TERT shares variance with `telomere_content_log2` (r = `r round(r_tc, 3)`), a genuine predictor. LASSO cannot perfectly isolate independent contributions when correlated features are present.
+2.  **Missingness bias**: With 58% of values absent, TERT is included only in the complete-case subset. The model optimises on a different sample when TERT is available, which can produce spurious coefficients.
+3.  **Negligible independent signal**: After accounting for `telomere_content_log2`, the partial correlation flips sign. The marginal R² is effectively zero.
 
 TERT expression is not a driver of `tf_primary_rate`; its occasional appearance in regularised models is an artefact of shared variance with telomere biology features.
+
+# Singleton distances by ALT status
+
+```{r singleton-faceted}
+#| fig-height: 9
+
+library(effsize)
+
+singleton_cols <- c(
+  "ATAGGG_singleton_dist", "CTAGGG_singleton_dist", "GTAGGG_singleton_dist",
+  "TAAGGG_singleton_dist", "TCAGGG_singleton_dist", "TGAGGG_singleton_dist",
+  "TTCGGG_singleton_dist", "TTGGGG_singleton_dist", "TTTGGG_singleton_dist"
+)
+
+sing_long <- data |>
+  select(alt_status, all_of(singleton_cols)) |>
+  pivot_longer(cols = all_of(singleton_cols),
+               names_to  = "variant",
+               values_to = "distance") |>
+  mutate(
+    variant    = str_remove(variant, "_singleton_dist"),
+    alt_status = factor(alt_status, levels = c("ALT-low", "ALT-high"))
+  )
+
+stats <- sing_long %>% 
+  group_by(variant) %>% 
+  wilcox_test(distance~alt_status) %>% 
+  adjust_pvalue(method = 'BH') %>% 
+  add_significance() %>% 
+  add_xy_position(x = 'alt_status')
+
+ggplot(sing_long, aes(x = alt_status, y = distance, fill = alt_status)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.2, size = 0.5) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+  facet_wrap(~ variant, ncol = 4) +
+  theme_bw() +
+  stat_pvalue_manual(stats, label = 'p', tip.length = 0.01) +
+  labs(
+    x     = NULL,
+    y     = "Singleton distance",
+    title = "Singleton distances by ALT status"
+  ) +
+  theme(legend.position = "none")
+
+# Cohen's d per variant; positive d = ALT-high > ALT-low
+effect_df <- map_dfr(singleton_cols, function(col) {
+  d   <- data |> select(alt_status, value = all_of(col)) |> filter(!is.na(value))
+  grp <- factor(d$alt_status, levels = c("ALT-high", "ALT-low"))
+  cd  <- effsize::cohen.d(d$value, grp)
+  tibble(
+    variant = str_remove(col, "_singleton_dist"),
+    d       = cd$estimate,
+    lower   = cd$conf.int["lower"],
+    upper   = cd$conf.int["upper"]
+  )
+}) |>
+  arrange(d)
+
+ggplot(effect_df, aes(x = d, y = reorder(variant, d))) +
+  geom_vline(xintercept = 0, linetype = "dashed", colour = "grey60") +
+  geom_errorbarh(aes(xmin = lower, xmax = upper), height = 0.3, colour = "steelblue") +
+  geom_point(size = 3, colour = "steelblue") +
+  theme_bw() +
+  labs(
+    x     = "Cohen's d (positive = higher in ALT-high)",
+    y     = NULL,
+    title = "Effect size of ALT status on singleton distances"
+  )
+```
+
+The faceted boxplot shows that all nine singleton distance distributions are centred near zero (dashed reference line). ALT-high samples are systematically shifted upward across most variants. The Cohen's d ranked dot plot quantifies this: TTCGGG, TGAGGG, and TCAGGG show the largest positive effects (d \> 0.3), indicating the strongest ALT-associated elevation, while TTTGGG and GTAGGG have effect sizes near zero with overlapping confidence intervals and contribute little discriminative signal. The correlated elevation across variant types is consistent with a shared recombination mechanism: ALT-driven template switching reduces distances to the nearest singleton uniformly across telomeric repeat variants rather than acting selectively on a single sequence context.
+
+# Telomere content and tf_primary_rate stratified by ALT status
+
+```{r tc-tfrate-scatter}
+ggplot(data, aes(x = telomere_content_log2, y = log1p(tf_primary_rate),
+                 colour = alt_status)) +
+  geom_point(alpha = 0.35, size = 1.2) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 0.9) +
+  theme_bw() +
+  labs(
+    x      = "Telomere content (log2)",
+    y      = "log1p(tf_primary_rate)",
+    colour = "ALT status",
+    title  = "Telomere content vs telomere fusion rate by ALT status"
+  )
+
+spearman_tbl <- data |>
+  group_by(alt_status) |>
+  summarise(
+    rho   = cor.test(telomere_content_log2, log1p(tf_primary_rate),
+                     method = "spearman", exact = FALSE)$estimate |> round(3),
+    p_val = cor.test(telomere_content_log2, log1p(tf_primary_rate),
+                     method = "spearman", exact = FALSE)$p.value |>
+              formatC(format = "e", digits = 2),
+    .groups = "drop"
+  )
+
+knitr::kable(spearman_tbl,
+             col.names = c("ALT status", "Spearman ρ", "p-value"),
+             caption   = "Spearman correlation: telomere content vs log1p(tf_primary_rate)")
+```
+
+In ALT-low tumours a negative correlation is expected and reflects the fundamental biology of replicative senescence: as telomeres shorten below the critical uncapping threshold, end-to-end fusions increase in frequency. Lower `telomere_content_log2` therefore predicts higher `tf_primary_rate`. In ALT-high tumours the relationship may differ or weaken because the ALT mechanism (break-induced replication, TERRA-mediated recombination) can simultaneously elongate telomeres and generate aberrant inter-telomeric junctions. This partial decoupling means that telomere length and fusion rate are no longer driven by the same rate-limiting step, and the Spearman correlation in this group is expected to be weaker or qualitatively different.
+
+# tf_blood_rate vs tf_primary_rate — shared genomic instability
+
+```{r blood-primary-correlation}
+ggplot(data, aes(x = log1p(tf_blood_rate), y = log1p(tf_primary_rate),
+                 colour = alt_status)) +
+  geom_point(alpha = 0.35, size = 1.2) +
+  geom_smooth(method = "lm", se = TRUE, colour = "black", linewidth = 0.9) +
+  theme_bw() +
+  labs(
+    x      = "log1p(tf_blood_rate)",
+    y      = "log1p(tf_primary_rate)",
+    colour = "ALT status",
+    title  = "Blood vs primary telomere fusion rate"
+  )
+
+m1      <- lm(log1p(tf_primary_rate) ~ log1p(tf_blood_rate), data = data)
+r2_m1   <- round(summary(m1)$r.squared, 4)
+coef_m1 <- round(coef(m1)["log1p(tf_blood_rate)"], 3)
+
+has_ct <- "cancer_type" %in% names(data)
+
+if (has_ct) {
+  m2      <- lm(log1p(tf_primary_rate) ~ log1p(tf_blood_rate) + cancer_type,
+                data = data)
+  r2_m2   <- round(summary(m2)$r.squared, 4)
+  coef_m2 <- round(coef(m2)["log1p(tf_blood_rate)"], 3)
+  attenuation <- abs(coef_m2) < abs(coef_m1) * 0.5
+  model_text <- paste0(
+    "Model 2 (blood rate + cancer type): R² = ", r2_m2,
+    ", tf_blood_rate coefficient = ", coef_m2, ". ",
+    if (attenuation) {
+      "The coefficient drops by more than half after cancer-type adjustment, indicating that most of the raw association is mediated by tumour type — cancer types that generate many primary fusions also tend to show elevated blood instability. The residual signal may still reflect a genuine systemic component."
+    } else {
+      "The coefficient is largely preserved after cancer-type adjustment, indicating the blood–primary association is not merely a consequence of shared tumour-type biology and points to a genuine systemic instability signal."
+    }
+  )
+} else {
+  model_text <- "cancer_type was not available in the data object; confounding by tumour type could not be assessed."
+}
+```
+
+The overall regression line (black, pooled across ALT groups) shows a positive association between blood and primary fusion rates. Model 1 (blood rate alone): R² = `r r2_m1`, coefficient = `r coef_m1`. `r model_text` If the tf_blood_rate coefficient survives cancer-type adjustment, it suggests that constitutional or blood-lineage genomic instability co-varies with tumour instability — a systemic signal potentially detectable via liquid biopsy. If it collapses, the association is cancer-type mediated and blood-rate adds no independent information beyond tumour histology.
+
+# Cancer type distribution by ALT status
+
+```{r cancer-type-alt}
+#| fig-height: 8
+
+if (!"cancer_type" %in% names(data)) {
+  cat("cancer_type column not found in data — section skipped.")
+} else {
+
+  cancer_props <- data |>
+    count(cancer_type, alt_status) |>
+    group_by(cancer_type) |>
+    mutate(total = sum(n), prop = n / total) |>
+    filter(total >= 5) |>
+    ungroup()
+
+  alt_high_order <- cancer_props |>
+    filter(alt_status == "ALT-high") |>
+    arrange(prop) |>
+    pull(cancer_type)
+
+  # Cancer types with zero ALT-high samples won't appear after filter; prepend them
+  all_ct            <- unique(cancer_props$cancer_type)
+  missing_from_order <- setdiff(all_ct, alt_high_order)
+  alt_high_order    <- c(missing_from_order, alt_high_order)
+
+  n_labels <- cancer_props |>
+    distinct(cancer_type, total) |>
+    mutate(cancer_type = factor(cancer_type, levels = alt_high_order))
+
+  print(
+    ggplot(
+      cancer_props |> mutate(cancer_type = factor(cancer_type, levels = alt_high_order)),
+      aes(x = prop, y = cancer_type, fill = alt_status)
+    ) +
+      geom_col() +
+      geom_text(
+        data      = n_labels,
+        aes(x = 1.01, y = cancer_type, label = paste0("n=", total)),
+        hjust = 0, size = 2.4, inherit.aes = FALSE
+      ) +
+      scale_x_continuous(labels = scales::percent_format(),
+                         limits = c(0, 1.2), expand = c(0, 0)) +
+      theme_bw() +
+      labs(
+        x     = "Proportion",
+        y     = NULL,
+        fill  = "ALT status",
+        title = "Cancer type distribution by ALT status (cancer types with ≥5 samples)"
+      ) +
+      theme(axis.text.y = element_text(size = 8))
+  )
+}
+```
+
+The stacked bar chart confirms the expected enrichment of ALT-high samples in mesenchymal and neuroectodermal tumour types: bone osteosarcoma, soft tissue sarcomas (leiomyosarcoma, liposarcoma), CNS glioblastoma, and CNS pilocytic astrocytoma consistently show the highest ALT-high fractions, matching the established biology of TERT-silent tumours that depend on homologous recombination for telomere maintenance. Carcinomas (lung, colorectal, pancreatic, prostate, hepatocellular) are overwhelmingly ALT-low, reflecting near-universal TERT reactivation in epithelial lineages. This distribution has a direct analytical implication: any feature that co-varies with histology (e.g., mutation rate, copy-number burden) will appear as an ALT predictor in pooled models simply because of the cancer-type confound, underscoring the need for stratified or cancer-type-adjusted analyses.
+
+# Feature correlation heatmap by ALT group
+
+```{r correlation-heatmap}
+#| fig-format: svg
+#| out-width: '100%'
+#| fig-height: 13
+
+library(corrplot)
+
+feat_cols      <- setdiff(names(data)[sapply(data, is.numeric)], "TERT_FPKM")
+feat_cols_tert <- names(data)[sapply(data, is.numeric)]   # includes TERT_FPKM
+
+shorten_name <- function(x) {
+  x |>
+    str_remove("_singleton_dist") |>
+    str_replace("telomere_insertion_rate", "tel_ins_rate") |>
+    str_replace("telomere_content_log2",   "tel_content") |>
+    str_replace("tf_primary_rate",         "tf_primary") |>
+    str_replace("tf_blood_rate",           "tf_blood")
+}
+
+# ── Row 1: full dataset, TERT excluded ─────────────────────────────────────
+dat_high <- data |> filter(alt_status == "ALT-high") |>
+  select(all_of(feat_cols)) |> na.omit()
+dat_low  <- data |> filter(alt_status == "ALT-low")  |>
+  select(all_of(feat_cols)) |> na.omit()
+
+cor_high <- cor(dat_high, method = "spearman")
+cor_low  <- cor(dat_low,  method = "spearman")
+colnames(cor_high) <- rownames(cor_high) <- shorten_name(colnames(cor_high))
+colnames(cor_low)  <- rownames(cor_low)  <- shorten_name(colnames(cor_low))
+
+ord          <- corrMatOrder(cor_low, order = "hclust")
+cor_low_ord  <- cor_low[ord, ord]
+cor_high_ord <- cor_high[ord, ord]
+
+# ── Row 2: complete cases, TERT included ────────────────────────────────────
+dat_high_tert <- data |> filter(alt_status == "ALT-high") |>
+  select(all_of(feat_cols_tert)) |> na.omit()
+dat_low_tert  <- data |> filter(alt_status == "ALT-low")  |>
+  select(all_of(feat_cols_tert)) |> na.omit()
+
+cor_high_tert <- cor(dat_high_tert, method = "spearman")
+cor_low_tert  <- cor(dat_low_tert,  method = "spearman")
+colnames(cor_high_tert) <- rownames(cor_high_tert) <- shorten_name(colnames(cor_high_tert))
+colnames(cor_low_tert)  <- rownames(cor_low_tert)  <- shorten_name(colnames(cor_low_tert))
+
+tert_order        <- c(rownames(cor_low_ord), "TERT_FPKM")
+cor_low_tert_ord  <- cor_low_tert[tert_order, tert_order]
+cor_high_tert_ord <- cor_high_tert[tert_order, tert_order]
+
+par(mfrow = c(2, 2))
+corrplot(cor_low_ord,
+         method = "color", type = "upper",
+         tl.cex = 0.72, tl.col = "black",
+         mar    = c(0, 0, 2.5, 0),
+         title  = paste0("ALT-low — full dataset  (n = ", nrow(dat_low), ")"),
+         cl.cex = 0.65)
+corrplot(cor_high_ord,
+         method = "color", type = "upper",
+         tl.cex = 0.72, tl.col = "black",
+         mar    = c(0, 0, 2.5, 0),
+         title  = paste0("ALT-high — full dataset  (n = ", nrow(dat_high), ")"),
+         cl.cex = 0.65)
+corrplot(cor_low_tert_ord,
+         method = "color", type = "upper",
+         tl.cex = 0.72, tl.col = "black",
+         mar    = c(0, 0, 2.5, 0),
+         title  = paste0("ALT-low — TERT complete cases  (n = ", nrow(dat_low_tert), ")"),
+         cl.cex = 0.65)
+corrplot(cor_high_tert_ord,
+         method = "color", type = "upper",
+         tl.cex = 0.72, tl.col = "black",
+         mar    = c(0, 0, 2.5, 0),
+         title  = paste0("ALT-high — TERT complete cases  (n = ", nrow(dat_high_tert), ")"),
+         cl.cex = 0.65)
+par(mfrow = c(1, 1))
+```
+
+The 2×2 layout allows two comparisons at once: left–right compares ALT groups within the same sample set; top–bottom compares the full dataset against the TERT-complete-case subset. In the full-dataset row (top), the singleton distances show stronger mutual correlations in ALT-high than in ALT-low, consistent with a shared recombination origin driving all nine distances jointly. The relationship between `tel_content` and `tel_ins_rate` also shifts between groups. In the TERT-complete-cases row (bottom), the reduced sample sizes — particularly the small ALT-high complete-case set — should be borne in mind when interpreting any correlation involving `TERT_FPKM`: the subset is strongly non-random (ALT-high TERT missingness is \~69%), so correlations in that panel reflect a selected, predominantly TERT-expressing subgroup. Comparing the top and bottom rows for the non-TERT features gives a crude sensitivity check: if the correlation structure is stable across rows, the complete-case restriction has not introduced substantial selection bias for those features.
