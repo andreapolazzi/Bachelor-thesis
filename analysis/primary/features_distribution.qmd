@@ -14,8 +14,10 @@ execute:
 ```{r setup}
 library(tidyverse)
 library(here)
+library(ggpubr)
+library(rstatix)
 
-data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
 ```
 
 # Distribution of telomere_insertion_rate
@@ -34,6 +36,27 @@ ggplot(data, aes(x = alt_status, y = log1p(telomere_insertion_rate), fill = alt_
 ```
 
 The boxplot shows that ALT-low samples are tightly concentrated near zero, while ALT-high samples have substantially higher and more variable values, extending well above 1. There is minimal overlap between the main distributions, indicating strong separation between groups based on this feature.
+
+# TERT expression by TERT_mod
+
+We would expect that samples with TERT mutations would have a higher expression of the TERT gene.
+
+```{r TERT-by-TERT-mod}
+stats <- data %>% 
+  mutate(TERT_FPKM = log1p(TERT_FPKM)) %>%  
+  wilcox_test(TERT_FPKM~TERT_mod) %>% 
+  adjust_pvalue(method = 'BH') %>% 
+  add_significance() %>% 
+  add_xy_position(x = 'TERT_mod')
+
+data %>% 
+  filter(!is.na(TERT_FPKM)) %>% 
+  drop_na() %>% 
+  ggplot(aes(x=TERT_mod, y=log1p(TERT_FPKM), fill = TERT_mod)) + 
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) + 
+  geom_jitter(width=0.15, alpha = 0.3, size = 0.8)+theme_bw() +
+  stat_pvalue_manual(stats, label = 'p.adj.signif')
+```
 
 # Why TERT_FPKM appears as a weak positive predictor of tf_primary_rate
 
@@ -62,13 +85,21 @@ p1 <- data %>%
   geom_histogram(bins = 40, fill = "steelblue", alpha = 0.7) +
   theme_bw() +
   labs(x = "log1p(TERT_FPKM)", y = "Count",
-       title = "TERT_FPKM distribution (complete cases only)")
+       title = "TERT_FPKM distribution")
+
+stats <- data %>% 
+  mutate(TERT_FPKM = log1p(TERT_FPKM)) %>% 
+  wilcox_test(TERT_FPKM~alt_status) %>% 
+  adjust_pvalue(method = 'BH') %>% 
+  add_significance() %>% 
+  add_xy_position(x='alt_status')
 
 p2 <- data %>%
   filter(!is.na(TERT_FPKM)) %>%
   ggplot(aes(x = alt_status, y = log1p(TERT_FPKM), fill = alt_status)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
   geom_jitter(width = 0.15, alpha = 0.3, size = 0.8) +
+  stat_pvalue_manual(stats, label = 'p.adj.signif') +
   theme_bw() +
   theme(legend.position = "none") +
   labs(x = NULL, y = "log1p(TERT_FPKM)",
@@ -170,9 +201,9 @@ ggplot(sing_long, aes(x = alt_status, y = distance, fill = alt_status)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
   geom_jitter(width = 0.15, alpha = 0.2, size = 0.5) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
-  facet_wrap(~ variant, ncol = 4) +
+  facet_wrap(~ variant, ncol = 3) +
   theme_bw() +
-  stat_pvalue_manual(stats, label = 'p', tip.length = 0.01) +
+  stat_pvalue_manual(stats, label = 'p.adj.signif', tip.length = 0.01) +
   labs(
     x     = NULL,
     y     = "Singleton distance",
