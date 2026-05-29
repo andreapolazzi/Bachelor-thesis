@@ -334,3 +334,326 @@ sv_importance(sv, kind = 'both')
 sv_waterfall(sv, row_id=1)
 sv_dependence(sv, v = 'telomere_insertion_rate', color_var = 'telomere_content_log2')
 ```
+
+------------------------------------------------------------------------
+
+# TabPFN Regression
+
+We apply TabPFN to two regression tasks that mirror notebooks 13_1 (`tf_primary_rate`) and 15_1 (`tf_blood_rate`). The same 5-fold × 5-repeat stratified CV and the same metrics (RMSE, MAE, Spearman ρ) are used to allow direct comparison with LM, LASSO, and RF.
+
+## Data setup
+
+```{r reg-setup}
+reg_data_raw <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+```
+
+------------------------------------------------------------------------
+
+# tTF regression
+
+Predicting `tf_primary_rate` (log1p scale) from all features including `tf_blood_rate`, mirroring notebook 13_1. The strong outlier (`tf_primary_rate >= 10`) is removed as in the reference analysis.
+
+```{r ttf-data}
+reg_data_ttf <- reg_data_raw %>%
+  drop_na() %>%
+  filter(tf_primary_rate < 10) %>%
+  mutate(
+    tf_primary_rate         = log1p(tf_primary_rate),
+    tf_blood_rate           = log1p(tf_blood_rate),
+    telomere_insertion_rate = log1p(telomere_insertion_rate),
+    TERT_FPKM               = log1p(TERT_FPKM),
+    alt_status              = as.numeric(alt_status == "ALT-high")
+  ) %>%
+  select(-donor_id, -cancer_type, -Specimen.Type.Summary, -cancer_group)
+
+cache_ttf      <- here('outputs', 'tabpfn_reg_ttf_cv.rds')
+run_tabpfn_ttf <- !file.exists(cache_ttf)
+
+x_ttf_r <- reg_data_ttf %>% select(-tf_primary_rate)
+y_ttf_r  <- reg_data_ttf$tf_primary_rate
+```
+
+## CV splits (tTF)
+
+```{r ttf-cv-splits}
+set.seed(21)
+ttf_cv_splits <- list()
+split_id <- 1
+
+for (r in 1:n_repeats) {
+  fold_id  <- integer(nrow(reg_data_ttf))
+  idx_low  <- which(reg_data_ttf$alt_status == 0)
+  idx_high <- which(reg_data_ttf$alt_status == 1)
+  fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
+  fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
+
+  for (fold in 1:k) {
+    ttf_cv_splits[[split_id]] <- list(
+      train = which(fold_id != fold),
+      test  = which(fold_id == fold),
+      rep   = r,
+      fold  = fold
+    )
+    split_id <- split_id + 1
+  }
+}
+```
+
+```{python tabpfn-reg-ttf, eval=run_tabpfn_ttf}
+import numpy as np
+from tabpfn_client import TabPFNRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from scipy.stats import spearmanr
+
+X = r.x_ttf_r.to_numpy().astype(float)
+y = np.array(r.y_ttf_r, dtype=float)
+
+per_fold_ttf = []
+
+for split in r.ttf_cv_splits:
+    tr = np.array(split["train"], dtype=int) - 1
+    te = np.array(split["test"],  dtype=int) - 1
+
+    reg = TabPFNRegressor()
+    reg.fit(X[tr], y[tr])
+    preds = reg.predict(X[te])
+    truth = y[te]
+
+    per_fold_ttf.append({
+        "rmse":     float(np.sqrt(mean_squared_error(truth, preds))),
+        "mae":      float(mean_absolute_error(truth, preds)),
+        "spearman": float(spearmanr(truth, preds)[0]),
+        "rep":      int(split["rep"]),
+        "fold":     int(split["fold"])
+    })
+```
+
+```{r ttf-load-or-save}
+if (file.exists(cache_ttf)) {
+  ttf_metrics <- readRDS(cache_ttf)
+  message("Loaded cached tTF results")
+} else {
+  ttf_metrics <- py$per_fold_ttf %>%
+    bind_rows() %>%
+    mutate(across(everything(), as.numeric), model = "TabPFN")
+  saveRDS(ttf_metrics, cache_ttf)
+  message("Saved tTF results")
+}
+```
+
+## CV results (tTF)
+
+```{r ttf-cv-results}
+ttf_metrics %>%
+  summarise(
+    across(
+      c(rmse, mae, spearman),
+      list(mean = ~mean(.x, na.rm = TRUE), sd = ~sd(.x, na.rm = TRUE)),
+      .names = "{.col}_{.fn}"
+    )
+  ) %>%
+  pivot_longer(everything(),
+               names_to  = c("metric", ".value"),
+               names_sep = "_(?=[^_]+$)") %>%
+  mutate(summary = paste0(round(mean, 4), " ± ", round(sd, 4))) %>%
+  select(metric, summary)
+
+ttf_metrics %>%
+  pivot_longer(c(rmse, mae, spearman), names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = model, y = value, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = 21) +
+  facet_wrap(~metric, scales = "free_y") +
+  labs(title = "TabPFN — tTF CV metrics (25 folds)", x = NULL, y = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+## Interpretability (tTF — HPC)
+
+```{r ttf-export-shap, eval=FALSE}
+dir.create(here('outputs', 'shap_input_ttf'), recursive = TRUE, showWarnings = FALSE)
+readr::write_csv(as.data.frame(x_ttf_r),
+                 here('outputs', 'shap_input_ttf', 'X_train.csv'))
+readr::write_csv(as.data.frame(x_ttf_r[seq_len(min(50, nrow(x_ttf_r))), ]),
+                 here('outputs', 'shap_input_ttf', 'X_test.csv'))
+readr::write_csv(data.frame(y_train = y_ttf_r),
+                 here('outputs', 'shap_input_ttf', 'y_train.csv'))
+```
+
+```{r ttf-shap-load}
+shap_ttf_dir   <- here('outputs', 'shap_output_ttf')
+shap_ttf_ready <- all(file.exists(
+  file.path(shap_ttf_dir, c('shap_values.csv', 'X_test_explained.csv', 'shap_baseline.txt'))
+))
+
+if (!shap_ttf_ready) {
+  cat("SHAP results for tTF regression not yet available.\n")
+  cat("Run on HPC:\n")
+  cat("  python scripts/SHAP_tabpfn_local.py \\\n")
+  cat("    --input-dir  outputs/shap_input_ttf \\\n")
+  cat("    --output-dir outputs/shap_output_ttf\n")
+} else {
+  sv_ttf <- shapviz(
+    object   = as.matrix(read.csv(file.path(shap_ttf_dir, 'shap_values.csv'))),
+    X        = read.csv(file.path(shap_ttf_dir, 'X_test_explained.csv')),
+    baseline = as.numeric(readLines(file.path(shap_ttf_dir, 'shap_baseline.txt')))
+  )
+  sv_importance(sv_ttf, kind = 'both')
+  sv_waterfall(sv_ttf, row_id = 1)
+}
+```
+
+------------------------------------------------------------------------
+
+# bTF regression
+
+Predicting `tf_blood_rate` (log1p scale) from all features including `tf_primary_rate`, mirroring notebook 15_1. No outlier filter is applied (consistent with the reference analysis).
+
+```{r btf-data}
+reg_data_btf <- reg_data_raw %>%
+  drop_na() %>%
+  mutate(
+    tf_primary_rate         = log1p(tf_primary_rate),
+    tf_blood_rate           = log1p(tf_blood_rate),
+    telomere_insertion_rate = log1p(telomere_insertion_rate),
+    TERT_FPKM               = log1p(TERT_FPKM),
+    alt_status              = as.numeric(alt_status == "ALT-high")
+  ) %>%
+  select(-donor_id, -cancer_type, -Specimen.Type.Summary, -cancer_group)
+
+cache_btf      <- here('outputs', 'tabpfn_reg_btf_cv.rds')
+run_tabpfn_btf <- !file.exists(cache_btf)
+
+x_btf_r <- reg_data_btf %>% select(-tf_blood_rate)
+y_btf_r  <- reg_data_btf$tf_blood_rate
+```
+
+## CV splits (bTF)
+
+```{r btf-cv-splits}
+set.seed(21)
+btf_cv_splits <- list()
+split_id <- 1
+
+for (r in 1:n_repeats) {
+  fold_id  <- integer(nrow(reg_data_btf))
+  idx_low  <- which(reg_data_btf$alt_status == 0)
+  idx_high <- which(reg_data_btf$alt_status == 1)
+  fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
+  fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
+
+  for (fold in 1:k) {
+    btf_cv_splits[[split_id]] <- list(
+      train = which(fold_id != fold),
+      test  = which(fold_id == fold),
+      rep   = r,
+      fold  = fold
+    )
+    split_id <- split_id + 1
+  }
+}
+```
+
+```{python tabpfn-reg-btf, eval=run_tabpfn_btf}
+import numpy as np
+from tabpfn_client import TabPFNRegressor
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+from scipy.stats import spearmanr
+
+X = r.x_btf_r.to_numpy().astype(float)
+y = np.array(r.y_btf_r, dtype=float)
+
+per_fold_btf = []
+
+for split in r.btf_cv_splits:
+    tr = np.array(split["train"], dtype=int) - 1
+    te = np.array(split["test"],  dtype=int) - 1
+
+    reg = TabPFNRegressor()
+    reg.fit(X[tr], y[tr])
+    preds = reg.predict(X[te])
+    truth = y[te]
+
+    per_fold_btf.append({
+        "rmse":     float(np.sqrt(mean_squared_error(truth, preds))),
+        "mae":      float(mean_absolute_error(truth, preds)),
+        "spearman": float(spearmanr(truth, preds)[0]),
+        "rep":      int(split["rep"]),
+        "fold":     int(split["fold"])
+    })
+```
+
+```{r btf-load-or-save}
+if (file.exists(cache_btf)) {
+  btf_metrics <- readRDS(cache_btf)
+  message("Loaded cached bTF results")
+} else {
+  btf_metrics <- py$per_fold_btf %>%
+    bind_rows() %>%
+    mutate(across(everything(), as.numeric), model = "TabPFN")
+  saveRDS(btf_metrics, cache_btf)
+  message("Saved bTF results")
+}
+```
+
+## CV results (bTF)
+
+```{r btf-cv-results}
+btf_metrics %>%
+  summarise(
+    across(
+      c(rmse, mae, spearman),
+      list(mean = ~mean(.x, na.rm = TRUE), sd = ~sd(.x, na.rm = TRUE)),
+      .names = "{.col}_{.fn}"
+    )
+  ) %>%
+  pivot_longer(everything(),
+               names_to  = c("metric", ".value"),
+               names_sep = "_(?=[^_]+$)") %>%
+  mutate(summary = paste0(round(mean, 4), " ± ", round(sd, 4))) %>%
+  select(metric, summary)
+
+btf_metrics %>%
+  pivot_longer(c(rmse, mae, spearman), names_to = "metric", values_to = "value") %>%
+  ggplot(aes(x = model, y = value, fill = model)) +
+  geom_boxplot(alpha = 0.7, outlier.shape = 21) +
+  facet_wrap(~metric, scales = "free_y") +
+  labs(title = "TabPFN — bTF CV metrics (25 folds)", x = NULL, y = NULL) +
+  theme_minimal(base_size = 13) +
+  theme(legend.position = "none")
+```
+
+## Interpretability (bTF — HPC)
+
+```{r btf-export-shap, eval=FALSE}
+dir.create(here('outputs', 'shap_input_btf'), recursive = TRUE, showWarnings = FALSE)
+readr::write_csv(as.data.frame(x_btf_r),
+                 here('outputs', 'shap_input_btf', 'X_train.csv'))
+readr::write_csv(as.data.frame(x_btf_r[seq_len(min(50, nrow(x_btf_r))), ]),
+                 here('outputs', 'shap_input_btf', 'X_test.csv'))
+readr::write_csv(data.frame(y_train = y_btf_r),
+                 here('outputs', 'shap_input_btf', 'y_train.csv'))
+```
+
+```{r btf-shap-load}
+shap_btf_dir   <- here('outputs', 'shap_output_btf')
+shap_btf_ready <- all(file.exists(
+  file.path(shap_btf_dir, c('shap_values.csv', 'X_test_explained.csv', 'shap_baseline.txt'))
+))
+
+if (!shap_btf_ready) {
+  cat("SHAP results for bTF regression not yet available.\n")
+  cat("Run on HPC:\n")
+  cat("  python scripts/SHAP_tabpfn_local.py \\\n")
+  cat("    --input-dir  outputs/shap_input_btf \\\n")
+  cat("    --output-dir outputs/shap_output_btf\n")
+} else {
+  sv_btf <- shapviz(
+    object   = as.matrix(read.csv(file.path(shap_btf_dir, 'shap_values.csv'))),
+    X        = read.csv(file.path(shap_btf_dir, 'X_test_explained.csv')),
+    baseline = as.numeric(readLines(file.path(shap_btf_dir, 'shap_baseline.txt')))
+  )
+  sv_importance(sv_btf, kind = 'both')
+  sv_waterfall(sv_btf, row_id = 1)
+}
+```
