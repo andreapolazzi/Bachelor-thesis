@@ -200,13 +200,18 @@ for split in cv_splits:
     tn   = int(np.sum((preds == 0) & (true == 0)))
     fn   = int(np.sum((preds == 0) & (true == 1)))
 
-    # sensitivity e specificity: NA-safe
-    sens = tp / (tp + fn) if (tp + fn) > 0 else float("nan")
-    spec = tn / (tn + fp) if (tn + fp) > 0 else float("nan")
+    sens     = tp / (tp + fn)         if (tp + fn) > 0         else float("nan")
+    spec     = tn / (tn + fp)         if (tn + fp) > 0         else float("nan")
+    prec     = tp / (tp + fp)         if (tp + fp) > 0         else float("nan")
+    recall   = sens
+    f1       = 2*tp / (2*tp + fp + fn) if (2*tp + fp + fn) > 0 else float("nan")
+    bal_acc  = 0.5 * (sens + spec)    if not (np.isnan(sens) or np.isnan(spec)) else float("nan")
 
     per_fold_metrics.append({
         "auc": auc, "tp": tp, "fp": fp, "tn": tn, "fn": fn,
-        "sensitivity": sens, "specificity": spec
+        "sensitivity": sens, "specificity": spec,
+        "precision": prec, "recall": recall,
+        "f1": f1, "balanced_accuracy": bal_acc
     })
 ```
 
@@ -227,12 +232,19 @@ if (file.exists(cache_file)) {
   message("Computed TabPFN results and saved")
 }
 
-metrics_df <- results$per_fold_metrics
+metrics_df <- results$per_fold_metrics %>%
+  mutate(
+    precision         = if_else((tp + fp) > 0, tp / (tp + fp), NA_real_),
+    recall            = if_else((tp + fn) > 0, tp / (tp + fn), NA_real_),
+    f1                = if_else((2*tp + fp + fn) > 0, 2*tp / (2*tp + fp + fn), NA_real_),
+    balanced_accuracy = 0.5 * (sensitivity + specificity)
+  )
 ```
 
 ```{r cv-results}
-cat('=== Previous results for reference ===\nLogistic Regression: ~0.94 ± 0.083\nRandom Forest:       ~0.98 ± 0.012')
+metrics_df <- metrics_df %>% mutate(model = "TabPFN")
 
+# aggregated confusion matrix (sum over all folds, for reference)
 agg_tp <- sum(metrics_df$tp)
 agg_fp <- sum(metrics_df$fp)
 agg_tn <- sum(metrics_df$tn)
@@ -248,19 +260,23 @@ cm_agg <- matrix(c(agg_tn, agg_fn,
                  ))
 print(cm_agg)
 
-cat("Aggregated sensitivity:", round(agg_tp / (agg_tp + agg_fn), 4), "\nAggregated specificity:", round(agg_tn / (agg_tn + agg_fp), 4), "\nAggregated balanced accuracy:", round(0.5 * (agg_tp/(agg_tp+agg_fn) + agg_tn/(agg_tn+agg_fp)), 4))
-
-cat("=== Per-fold metrics (mean ± SD across 25 folds) ===\n")
-metrics_df %>%
+cat("\n=== Per-fold metrics (mean ± SD across 25 folds) ===\n")
+tabpfn_summary <- metrics_df %>%
   summarise(
-    across(c(auc, sensitivity, specificity),
-           list(mean = ~round(mean(.x, na.rm=TRUE), 4),
-                sd   = ~round(sd(.x,   na.rm=TRUE), 4)))
+    across(
+      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      list(mean = ~mean(.x, na.rm = TRUE), sd = ~sd(.x, na.rm = TRUE)),
+      .names = "{.col}_{.fn}"
+    )
+  )
+
+tabpfn_summary %>%
+  pivot_longer(
+    everything(),
+    names_to  = c("metric", ".value"),
+    names_sep = "_(?=[^_]+$)"
   ) %>%
-  pivot_longer(everything(),
-               names_to  = c("metric", ".value"),
-               names_sep = "_(?=[^_]+$)") %>%
-  mutate(summary = paste0(mean, " ± ", sd)) %>%
+  mutate(summary = paste0(round(mean, 4), " ± ", round(sd, 4))) %>%
   select(metric, summary) %>%
   print()
 ```
@@ -306,4 +322,15 @@ if (length(existing_files) == 0) {
 }
 ```
 
-TODO: feature ablation, try inference of TERT, try extensions (ensembles, interpretability, RF)
+```{r tabpfn-shap-hpc-test}
+library(shapviz)
+sv <- shapviz(
+  object = as.matrix(read.csv(here('outputs', 'output_test', 'shap_values.csv'))),
+  X = read.csv(here('outputs', 'output_test', 'X_test_explained.csv')),
+  baseline = as.numeric(readLines(here('outputs', 'output_test', 'shap_baseline.txt')))
+)
+
+sv_importance(sv, kind = 'both')
+sv_waterfall(sv, row_id=1)
+sv_dependence(sv, v = 'telomere_insertion_rate', color_var = 'telomere_content_log2')
+```
