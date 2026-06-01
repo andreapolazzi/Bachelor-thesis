@@ -1,5 +1,5 @@
 ---
-title: "features_distribution"
+title: "Telomere Feature Distributions — PCAWG Primary Tumors"
 date: today
 format:
   html:
@@ -16,99 +16,247 @@ library(tidyverse)
 library(here)
 library(ggpubr)
 library(rstatix)
-
-data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
-```
-
-# Distribution of telomere_insertion_rate
-
-```{r tel-ins-distribution}
-ggplot(data, aes(x = alt_status, y = log1p(telomere_insertion_rate), fill = alt_status)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
-  geom_jitter(width = 0.15, alpha = 0.35, size = 1) +
-  theme_bw() +
-  labs(
-    x     = NULL,
-    y     = "Telomere insertion rate (log1p)",
-    title = "Distribution of log1p(telomere_insertion_rate) by ALT status"
-  ) +
-  theme(legend.position = "none")
-```
-
-The boxplot shows that ALT-low samples are tightly concentrated near zero, while ALT-high samples have substantially higher and more variable values, extending well above 1. There is minimal overlap between the main distributions, indicating strong separation between groups based on this feature.
-
-# TERT expression by TERT_mod
-
-We would expect that samples with TERT mutations would have a higher expression of the TERT gene.
-
-```{r TERT-by-TERT-mod}
-stats <- data %>% 
-  mutate(TERT_FPKM = log1p(TERT_FPKM)) %>%  
-  wilcox_test(TERT_FPKM~TERT_mod) %>% 
-  adjust_pvalue(method = 'BH') %>% 
-  add_significance() %>% 
-  add_xy_position(x = 'TERT_mod')
-
-data %>% 
-  filter(!is.na(TERT_FPKM)) %>% 
-  drop_na() %>% 
-  ggplot(aes(x=TERT_mod, y=log1p(TERT_FPKM), fill = TERT_mod)) + 
-  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) + 
-  geom_jitter(width=0.15, alpha = 0.3, size = 0.8)+theme_bw() +
-  stat_pvalue_manual(stats, label = 'p.adj.signif')
-```
-
-# Why TERT_FPKM appears as a weak positive predictor of tf_primary_rate
-
-LASSO and SHAP analyses on `tf_primary_rate` occasionally assign small positive coefficients or SHAP values to `TERT_FPKM`. This is counterintuitive: TERT activation is a mechanism alternative to ALT, so high TERT expression should not drive high `tf_primary_rate`. The sections below show this signal is an artifact of shared variance and missing data, not a genuine association.
-
-## Distribution and missingness
-
-```{r tert-missing}
-library(tidyverse)
-library(here)
 library(patchwork)
 
-data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
 
+alt_colors <- c("ALT-low" = "#4E79A7", "ALT-high" = "#E15759")
+
+make_boxplot <- function(df, var, ylabel, log_transform = FALSE) {
+  plot_data <- df |> filter(!is.na(.data[[var]]))
+  if (log_transform) {
+    plot_data <- plot_data |> mutate(plot_var = log1p(.data[[var]]))
+    ylabel <- paste0("log(1 + ", ylabel, ")")
+  } else {
+    plot_data <- plot_data |> mutate(plot_var = .data[[var]])
+  }
+  ggplot(plot_data, aes(alt_status, plot_var, fill = alt_status)) +
+    geom_boxplot(outlier.size = 0.8, outlier.alpha = 0.4, width = 0.5) +
+    scale_fill_manual(values = alt_colors) +
+    stat_compare_means(method = "wilcox.test", label = "p.signif",
+                       label.x = 1.5, size = 5, hide.ns = FALSE) +
+    labs(x = NULL, y = ylabel) +
+    theme_bw(base_size = 12) +
+    theme(legend.position = "none")
+}
+```
+
+# tTF and bTF rate by ALT status
+
+Tumor (tTF) and blood (bTF) telomere fusion rates compared side by side by ALT status. Wilcoxon rank-sum test p-value shown.
+
+```{r ttf-btf-distributions, fig.width=9, fig.height=5}
+p_ttf <- ggplot(data |> filter(!is.na(tf_primary_rate)),
+                aes(x = alt_status, y = log1p(tf_primary_rate), fill = alt_status)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.35, size = 1) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif", label.x = 1.5) +
+  scale_fill_manual(values = alt_colors) +
+  theme_bw() +
+  labs(x = NULL, y = "tTF rate (log1p)", title = "Tumor TF rate by ALT status") +
+  theme(legend.position = "none")
+
+p_btf <- ggplot(data |> filter(!is.na(tf_blood_rate)),
+                aes(x = alt_status, y = log1p(tf_blood_rate), fill = alt_status)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.35, size = 1) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif", label.x = 1.5) +
+  scale_fill_manual(values = alt_colors) +
+  theme_bw() +
+  labs(x = NULL, y = "bTF rate (log1p)", title = "Blood TF rate by ALT status") +
+  theme(legend.position = "none")
+
+p_ttf | p_btf
+```
+
+The tTF rate shows a clear elevation in ALT-high samples, consistent with the recombination-driven mechanism generating aberrant junctions. The bTF rate is measured in matched blood samples and is expected to reflect baseline constitutional instability rather than tumour-specific ALT activity; any elevation in ALT-high cases would point to a systemic instability signal co-occurring with the ALT phenotype.
+
+# Main telomere features by ALT status
+
+```{r main-features-boxplots, fig.width=13, fig.height=5}
+p1 <- make_boxplot(data, "tf_primary_rate",        "tTF rate",                  log_transform = TRUE)
+p2 <- make_boxplot(data, "tf_blood_rate",           "bTF rate",                  log_transform = TRUE)
+p3 <- make_boxplot(data, "telomere_insertion_rate", "Telomere Insertion Rate",   log_transform = TRUE)
+p4 <- make_boxplot(data, "telomere_content_log2",   "Telomere Content (log2)",   log_transform = FALSE)
+
+(p1 | p2 | p3 | p4) +
+  plot_annotation(title = "Main telomere features by ALT status")
+```
+
+# Scatter Plots
+
+Pairwise relationships between key telomere features, coloured by ALT status. Log(1+x) transformations are applied to right-skewed rate variables.
+
+## tTF Rate vs Telomere Insertion Rate
+
+```{r scatter-tf-telins}
+data |>
+  filter(!is.na(tf_primary_rate), !is.na(telomere_insertion_rate)) |>
+  ggplot(aes(log1p(tf_primary_rate), log1p(telomere_insertion_rate), color = alt_status)) +
+  geom_point(alpha = 0.45, size = 1.4) +
+  scale_color_manual(values = alt_colors) +
+  labs(
+    x     = "log(1 + tTF rate)",
+    y     = "log(1 + Telomere Insertion Rate)",
+    color = "ALT status",
+    title = "tTF Rate vs Telomere Insertion Rate"
+  ) +
+  theme_bw(base_size = 13)
+```
+
+## tTF Rate vs bTF Rate
+
+```{r scatter-ttf-btf}
+data |>
+  filter(!is.na(tf_primary_rate), !is.na(tf_blood_rate)) |>
+  ggplot(aes(log1p(tf_blood_rate), log1p(tf_primary_rate), color = alt_status)) +
+  geom_point(alpha = 0.45, size = 1.4) +
+  scale_color_manual(values = alt_colors) +
+  labs(
+    x     = "log(1 + bTF rate)",
+    y     = "log(1 + tTF rate)",
+    color = "ALT status",
+    title = "bTF Rate vs tTF Rate"
+  ) +
+  theme_bw(base_size = 13)
+```
+
+## tTF Rate vs Telomere Content
+
+```{r scatter-tf-telcontent}
+data |>
+  filter(!is.na(tf_primary_rate), !is.na(telomere_content_log2)) |>
+  ggplot(aes(log1p(tf_primary_rate), telomere_content_log2, color = alt_status)) +
+  geom_point(alpha = 0.45, size = 1.4) +
+  scale_color_manual(values = alt_colors) +
+  labs(
+    x     = "log(1 + tTF rate)",
+    y     = "Telomere Content (log2)",
+    color = "ALT status",
+    title = "tTF Rate vs Telomere Content"
+  ) +
+  theme_bw(base_size = 13)
+```
+
+## Telomere Insertion Rate vs Telomere Content
+
+```{r scatter-telins-telcontent}
+data |>
+  filter(!is.na(telomere_insertion_rate), !is.na(telomere_content_log2)) |>
+  ggplot(aes(log1p(telomere_insertion_rate), telomere_content_log2, color = alt_status)) +
+  geom_point(alpha = 0.45, size = 1.4) +
+  scale_color_manual(values = alt_colors) +
+  labs(
+    x     = "log(1 + Telomere Insertion Rate)",
+    y     = "Telomere Content (log2)",
+    color = "ALT status",
+    title = "Telomere Insertion Rate vs Telomere Content"
+  ) +
+  theme_bw(base_size = 13)
+```
+
+# TERT expression
+
+```{r tert-data-load}
 n_total <- nrow(data)
 n_na    <- sum(is.na(data$TERT_FPKM))
 pct_na  <- round(100 * n_na / n_total, 1)
 ```
 
-`TERT_FPKM` is missing in **`r n_na` / `r n_total` samples (`r pct_na`%)**. In ALT-high samples the missingness reaches 69%. Any model using TERT trains on a non-random, severely reduced subset.
+## TERT level by ALT status
 
-```{r tert-distribution}
-p1 <- data %>%
-  filter(!is.na(TERT_FPKM)) %>%
-  ggplot(aes(x = log1p(TERT_FPKM))) +
-  geom_histogram(bins = 40, fill = "steelblue", alpha = 0.7) +
-  theme_bw() +
-  labs(x = "log1p(TERT_FPKM)", y = "Count",
-       title = "TERT_FPKM distribution")
+```{r tert-by-alt}
+stats_alt <- data %>%
+  mutate(TERT_FPKM = log1p(TERT_FPKM)) %>%
+  wilcox_test(TERT_FPKM ~ alt_status) %>%
+  adjust_pvalue(method = 'BH') %>%
+  add_significance() %>%
+  add_xy_position(x = 'alt_status')
 
-stats <- data %>% 
-  mutate(TERT_FPKM = log1p(TERT_FPKM)) %>% 
-  wilcox_test(TERT_FPKM~alt_status) %>% 
-  adjust_pvalue(method = 'BH') %>% 
-  add_significance() %>% 
-  add_xy_position(x='alt_status')
-
-p2 <- data %>%
+data %>%
   filter(!is.na(TERT_FPKM)) %>%
   ggplot(aes(x = alt_status, y = log1p(TERT_FPKM), fill = alt_status)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
   geom_jitter(width = 0.15, alpha = 0.3, size = 0.8) +
-  stat_pvalue_manual(stats, label = 'p.adj.signif') +
+  stat_pvalue_manual(stats_alt, label = 'p.adj.signif') +
+  scale_fill_manual(values = alt_colors) +
   theme_bw() +
   theme(legend.position = "none") +
-  labs(x = NULL, y = "log1p(TERT_FPKM)",
-       title = "TERT_FPKM by ALT status")
-
-p1 + p2
+  labs(x = NULL, y = "log1p(TERT_FPKM)", title = "TERT expression by ALT status")
 ```
 
-Among complete cases, ALT-high samples actually have a **lower** median TERT (0.007) than ALT-low samples (0.117), consistent with TERT suppression in ALT tumours.
+Among complete cases, ALT-high samples have a **lower** median TERT than ALT-low samples, consistent with TERT suppression in ALT tumours.
+
+## TERT expression by TERT_mod
+
+Samples with TERT promoter mutations are expected to show higher TERT expression.
+
+```{r TERT-by-TERT-mod}
+stats_mod <- data %>%
+  mutate(TERT_FPKM = log1p(TERT_FPKM)) %>%
+  wilcox_test(TERT_FPKM ~ TERT_mod) %>%
+  adjust_pvalue(method = 'BH') %>%
+  add_significance() %>%
+  add_xy_position(x = 'TERT_mod')
+
+data %>%
+  filter(!is.na(TERT_FPKM)) %>%
+  drop_na() %>%
+  ggplot(aes(x = TERT_mod, y = log1p(TERT_FPKM), fill = TERT_mod)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.3, size = 0.8) +
+  theme_bw() +
+  stat_pvalue_manual(stats_mod, label = 'p.adj.signif')
+```
+
+## Missingness
+
+`TERT_FPKM` is missing in **`r n_na` / `r n_total` samples (`r pct_na`%)**. In ALT-high samples the missingness reaches 69%. Any model using TERT trains on a non-random, severely reduced subset.
+
+```{r tert-distribution}
+data %>%
+  filter(!is.na(TERT_FPKM)) %>%
+  ggplot(aes(x = log1p(TERT_FPKM))) +
+  geom_histogram(bins = 40, fill = "steelblue", alpha = 0.7) +
+  theme_bw() +
+  labs(x = "log1p(TERT_FPKM)", y = "Count", title = "TERT_FPKM distribution (complete cases)")
+```
+
+## TERT scatterplots
+
+```{r scatter-tert-tf}
+data |>
+  filter(!is.na(TERT_FPKM), !is.na(tf_primary_rate)) |>
+  ggplot(aes(log1p(TERT_FPKM), log1p(tf_primary_rate), color = alt_status)) +
+  geom_point(alpha = 0.45, size = 1.4) +
+  scale_color_manual(values = alt_colors) +
+  labs(
+    x     = "log(1 + TERT FPKM)",
+    y     = "log(1 + tTF rate)",
+    color = "ALT status",
+    title = "TERT Expression vs tTF Rate"
+  ) +
+  theme_bw(base_size = 13)
+```
+
+```{r scatter-tert-telcontent}
+data |>
+  filter(!is.na(TERT_FPKM), !is.na(telomere_content_log2)) |>
+  ggplot(aes(log1p(TERT_FPKM), telomere_content_log2, color = alt_status)) +
+  geom_point(alpha = 0.45, size = 1.4) +
+  scale_color_manual(values = alt_colors) +
+  labs(
+    x     = "log(1 + TERT FPKM)",
+    y     = "Telomere Content (log2)",
+    color = "ALT status",
+    title = "TERT Expression vs Telomere Content"
+  ) +
+  theme_bw(base_size = 13)
+```
+
+# Why TERT_FPKM appears as a weak positive predictor of tf_primary_rate
+
+LASSO and SHAP analyses on `tf_primary_rate` occasionally assign small positive coefficients or SHAP values to `TERT_FPKM`. This is counterintuitive: TERT activation is a mechanism alternative to ALT, so high TERT expression should not drive high `tf_primary_rate`. The sections below show this signal is an artifact of shared variance and missing data, not a genuine association.
 
 ## Marginal and partial correlations with tf_primary_rate
 
@@ -133,7 +281,7 @@ r2_tert <- summary(lm(tf_primary_rate ~ log1p(TERT_FPKM), data = d_r2))$r.square
 ```
 
 | Quantity | Value |
-|------------------------------------|------------------------------------|
+|----|----|
 | Marginal *r*(TERT, tf_primary_rate) | `r round(r_marginal, 3)` |
 | *R*² of TERT alone | `r formatC(r2_tert, format = "f", digits = 4)` |
 | *r*(TERT, telomere_content_log2) | `r round(r_tc, 3)` |
@@ -149,6 +297,7 @@ data %>%
   ggplot(aes(x = log1p(TERT_FPKM), y = tf_primary_rate, colour = alt_status)) +
   geom_point(alpha = 0.4, size = 1.2) +
   geom_smooth(method = "lm", se = TRUE, linewidth = 0.8) +
+  scale_color_manual(values = alt_colors) +
   theme_bw() +
   labs(x = "log1p(TERT_FPKM)", y = "tf_primary_rate",
        colour = "ALT status",
@@ -202,6 +351,7 @@ ggplot(sing_long, aes(x = alt_status, y = distance, fill = alt_status)) +
   geom_jitter(width = 0.15, alpha = 0.2, size = 0.5) +
   geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
   facet_wrap(~ variant, ncol = 3) +
+  scale_fill_manual(values = alt_colors) +
   theme_bw() +
   stat_pvalue_manual(stats, label = 'p.adj.signif', tip.length = 0.01) +
   labs(
@@ -246,6 +396,7 @@ ggplot(data, aes(x = telomere_content_log2, y = log1p(tf_primary_rate),
                  colour = alt_status)) +
   geom_point(alpha = 0.35, size = 1.2) +
   geom_smooth(method = "lm", se = TRUE, linewidth = 0.9) +
+  scale_color_manual(values = alt_colors) +
   theme_bw() +
   labs(
     x      = "Telomere content (log2)",
@@ -279,6 +430,7 @@ ggplot(data, aes(x = log1p(tf_blood_rate), y = log1p(tf_primary_rate),
                  colour = alt_status)) +
   geom_point(alpha = 0.35, size = 1.2) +
   geom_smooth(method = "lm", se = TRUE, colour = "black", linewidth = 0.9) +
+  scale_color_manual(values = alt_colors) +
   theme_bw() +
   labs(
     x      = "log1p(tf_blood_rate)",
@@ -358,6 +510,7 @@ if (!"cancer_type" %in% names(data)) {
       ) +
       scale_x_continuous(labels = scales::percent_format(),
                          limits = c(0, 1.2), expand = c(0, 0)) +
+      scale_fill_manual(values = alt_colors) +
       theme_bw() +
       labs(
         x     = "Proportion",
