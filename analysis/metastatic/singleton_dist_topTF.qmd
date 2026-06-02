@@ -11,6 +11,9 @@ execute:
   warning: false
   message: false
   freeze: auto
+editor: 
+  markdown: 
+    wrap: 72
 ---
 
 ```{r setup}
@@ -107,29 +110,41 @@ plot_motifs <- function(df, title) {
 ```
 
 This analysis runs the **same comparison independently** in the primary
-(PCAWG) and metastatic cohorts: for each of the 9 telomere variant repeat
-(TVR) motifs, does the per-sample `singleton_dist` value differ between the
-highest-TF-rate samples and the rest? The two datasets are reported side by
-side so any shared pattern can be judged by eye — there is **no automated
-cross-dataset test**.
+(PCAWG) and metastatic cohorts: for each of the 9 telomere variant
+repeat (TVR) motifs, does the per-sample `singleton_dist` value differ
+between the highest-TF-rate samples and the rest? The two datasets are
+reported side by side so any shared pattern can be judged by eye — there
+is **no automated cross-dataset test**.
 
-- **Test:** Wilcoxon rank-sum (Mann–Whitney), `top` vs `rest`, on the raw
-  `singleton_dist` value.
-- **Top group:** highest 10% and highest 25% of tumour TF rate
-  (`tf_primary_rate` in primary, `tumor_tf_rate` in metastatic), reported
-  separately.
-- **Multiple testing:** Benjamini–Hochberg FDR across the 9 motifs, applied
-  within each dataset × threshold block. Each dataset is corrected on its own.
-- **Direction:** `median_diff = median(top) − median(rest)`.
+-   **Test:** Wilcoxon rank-sum (Mann–Whitney), `top` vs `rest`, on the
+    raw `singleton_dist` value.
+-   **Top group:** highest 5% and highest 10% of tumour TF rate
+    (`tf_primary_rate` in primary, `tumor_tf_rate` in metastatic),
+    reported separately.
+-   **Multiple testing:** Benjamini–Hochberg FDR across the 9 motifs,
+    applied within each dataset × threshold block. Each dataset is
+    corrected on its own.
+-   **Direction:** `median_diff = median(top) − median(rest)`.
 
 ```{r assign-groups}
+prim_5 <- assign_top(primary,    "tf_primary_rate", 0.05)
 prim_10 <- assign_top(primary,    "tf_primary_rate", 0.10)
-prim_25 <- assign_top(primary,    "tf_primary_rate", 0.25)
+meta_5 <- assign_top(metastatic, "tumor_tf_rate",   0.05)
 meta_10 <- assign_top(metastatic, "tumor_tf_rate",   0.10)
-meta_25 <- assign_top(metastatic, "tumor_tf_rate",   0.25)
 ```
 
 # Primary (PCAWG)
+
+## Top 5% TF rate
+
+```{r prim-5-tbl}
+res_prim_5 <- test_motifs(prim_5, 0.05)
+fmt_table(res_prim_5)
+```
+
+```{r prim-5-plot, fig.width = 10, fig.height = 8}
+plot_motifs(prim_5, "Primary — singleton_dist, top 5% TF vs rest")
+```
 
 ## Top 10% TF rate
 
@@ -142,18 +157,18 @@ fmt_table(res_prim_10)
 plot_motifs(prim_10, "Primary — singleton_dist, top 10% TF vs rest")
 ```
 
-## Top 25% TF rate
-
-```{r prim-25-tbl}
-res_prim_25 <- test_motifs(prim_25, 0.25)
-fmt_table(res_prim_25)
-```
-
-```{r prim-25-plot, fig.width = 10, fig.height = 8}
-plot_motifs(prim_25, "Primary — singleton_dist, top 25% TF vs rest")
-```
-
 # Metastatic
+
+## Top 5% TF rate
+
+```{r meta-5-tbl}
+res_meta_5 <- test_motifs(meta_5, 0.05)
+fmt_table(res_meta_5)
+```
+
+```{r meta-5-plot, fig.width = 10, fig.height = 8}
+plot_motifs(meta_5, "Metastatic — singleton_dist, top 5% TF vs rest")
+```
 
 ## Top 10% TF rate
 
@@ -166,22 +181,24 @@ fmt_table(res_meta_10)
 plot_motifs(meta_10, "Metastatic — singleton_dist, top 10% TF vs rest")
 ```
 
-## Top 25% TF rate
-
-```{r meta-25-tbl}
-res_meta_25 <- test_motifs(meta_25, 0.25)
-fmt_table(res_meta_25)
-```
-
-```{r meta-25-plot, fig.width = 10, fig.height = 8}
-plot_motifs(meta_25, "Metastatic — singleton_dist, top 25% TF vs rest")
-```
-
 # Side-by-side comparison
 
-Primary and metastatic results aligned per motif, for visual comparison only.
-`diff` columns are `median(top) − median(rest)`; `p.adj` are the BH-corrected
-p-values within each cohort.
+Primary and metastatic results aligned per motif, for visual comparison
+only. `diff` columns are `median(top) − median(rest)`; `p.adj` are the
+BH-corrected p-values within each cohort.
+
+## Top 5%
+
+```{r compare-5}
+left_join(
+  res_prim_5 |> select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
+  res_meta_5 |> select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
+  by = "motif"
+) |>
+  mutate(across(c(prim_diff, meta_diff), \(x) round(x, 3)),
+         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) |>
+  kable()
+```
 
 ## Top 10%
 
@@ -196,31 +213,18 @@ left_join(
   kable()
 ```
 
-## Top 25%
-
-```{r compare-25}
-left_join(
-  res_prim_25 |> select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
-  res_meta_25 |> select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
-  by = "motif"
-) |>
-  mutate(across(c(prim_diff, meta_diff), \(x) round(x, 3)),
-         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) |>
-  kable()
-```
-
 # Group sizes
 
-Realized `top` / `rest` counts per dataset and threshold (per-motif test counts
-may be lower where `singleton_dist` is missing).
+Realized `top` / `rest` counts per dataset and threshold (per-motif test
+counts may be lower where `singleton_dist` is missing).
 
 ```{r group-sizes}
 tibble(
   dataset   = c("primary", "primary", "metastatic", "metastatic"),
-  threshold = c("top 10%", "top 25%", "top 10%", "top 25%"),
-  n_top  = c(sum(prim_10$tf_group == "top"),  sum(prim_25$tf_group == "top"),
-             sum(meta_10$tf_group == "top"),  sum(meta_25$tf_group == "top")),
-  n_rest = c(sum(prim_10$tf_group == "rest"), sum(prim_25$tf_group == "rest"),
-             sum(meta_10$tf_group == "rest"), sum(meta_25$tf_group == "rest"))
+  threshold = c("top 5%", "top 10%", "top 5%", "top 10%"),
+  n_top  = c(sum(prim_5$tf_group == "top"),  sum(prim_10$tf_group == "top"),
+             sum(meta_5$tf_group == "top"),  sum(meta_10$tf_group == "top")),
+  n_rest = c(sum(prim_5$tf_group == "rest"), sum(prim_10$tf_group == "rest"),
+             sum(meta_5$tf_group == "rest"), sum(meta_10$tf_group == "rest"))
 ) |> kable()
 ```
