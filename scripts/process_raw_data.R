@@ -389,40 +389,41 @@ met_red_edit_pat_code <- met_red_edit %>%
   left_join(code_conv_df %>% select(patient_id, patient_code), by = 'patient_id') %>% 
   relocate(patient_code, .after = patient_id)
 
-# TelomereHunter's singleton distance is:
-# log2(singleton_tumor_norm / singleton_control_norm) -
-# log2(tel_content_tumor / tel_content_control).
+# TelomereHunter2's singleton distance is:
+#   log2(singleton_tumor_norm / singleton_control_norm) -
+#   log2(tel_content_tumor / tel_content_control)
+# where singleton_norm = singleton_count / total_reads and tel_content are BOTH on the
+# SAME TelomereHunter-native total_reads of the input BAM.
 #
-# The metastatic table already contains tumor singleton counts normalized by
-# WGS total reads. First check those values match the values recovered from the
-# TelomereHunter summary within a small tolerance, then use the existing
-# metastatic tumor values directly. Control values are recovered from the
-# TelomereHunter summary and normalized by the control WGS Total_reads_used.
+# IMPORTANT: TH was run on TelFusDetector-filtered BAMs, so total_reads is the filtered
+# read count (~1e5), not WGS depth (~1e9). That is fine here because the same total_reads
+# normalizes both the singleton term and the tel_content term, so the filtered scale
+# cancels and the metric is preserved.
 
-# Step 1: recompute tumor singleton normalization from the TH summary (reference for cross-check)
-th_tumor_normalized <- th_singleton_results %>%
-  select(PID, sample, total_reads, all_of(singleton_norm_cols)) %>%
-  filter(sample == "tumor") %>%
-  mutate(sample_code = str_remove(PID, "-.*$")) %>%
+# Step 1: tumor & control singleton norms + tel_content per matched pair (keyed by tumor_code).
+singleton_dist_long <- th_singleton_results %>%
+  mutate(tumor_code = str_remove(PID, "-.*$")) %>%
+  select(PID, tumor_code, sample, total_reads, tel_content, all_of(singleton_norm_cols)) %>%
   pivot_longer(
     cols = all_of(singleton_norm_cols),
     names_to = "singleton_col",
-    values_to = "singleton_norm_by_th_reads"
+    values_to = "singleton_norm"
   ) %>%
-  mutate(singleton_count = singleton_norm_by_th_reads * total_reads) %>%
-  left_join(
-    total_reads_used_df %>%
-      select(sample_code = sample, wgs_total_reads_used = Total_reads_used),
-    by = "sample_code"
-  ) %>%
-  mutate(singleton_norm_by_wgs_reads = singleton_count / wgs_total_reads_used) %>%
-  group_by(sample_code, singleton_col) %>%
+  mutate(pattern = str_remove(singleton_col, "_singletons_norm_by_all_reads$")) %>%
+  group_by(tumor_code, pattern) %>%
   summarise(
-    singleton_norm_by_wgs_reads = first(na.omit(singleton_norm_by_wgs_reads)),
+    norm_tumor          = first(na.omit(singleton_norm[sample == "tumor"])),
+    norm_control        = first(na.omit(singleton_norm[sample == "control"])),
+    total_reads_tumor   = first(na.omit(total_reads[sample == "tumor"])),
+    tel_content_tumor   = first(na.omit(tel_content[sample == "tumor"])),
+    tel_content_control = first(na.omit(tel_content[sample == "control"])),
     .groups = "drop"
   )
 
-# Step 2: compare TH-derived values against values already stored in the metastatic table
+# Step 2: sanity check the join at the RAW-COUNT level. The metastatic table stores tumor
+# singletons normalized by WGS reads, while the TH summary normalizes by filtered total_reads;
+# recovering the raw count from each (norm * its own denominator) must agree if the right
+# samples are joined.
 tumor_singleton_check <- met_red_edit_pat_code %>%
   select(patient_id, patient_code, all_of(singleton_norm_cols)) %>%
   pivot_longer(
@@ -430,95 +431,46 @@ tumor_singleton_check <- met_red_edit_pat_code %>%
     names_to = "singleton_col",
     values_to = "singleton_norm_existing"
   ) %>%
+  mutate(pattern = str_remove(singleton_col, "_singletons_norm_by_all_reads$")) %>%
+  left_join(total_reads_used_df %>% select(patient_code = sample, wgs = Total_reads_used),
+            by = "patient_code") %>%
   left_join(
-    th_tumor_normalized,
-    by = join_by(patient_code == sample_code, singleton_col)
+    singleton_dist_long %>% select(tumor_code, pattern, norm_tumor, total_reads_tumor),
+    by = join_by(patient_code == tumor_code, pattern)
   ) %>%
-  filter(!is.na(singleton_norm_existing), !is.na(singleton_norm_by_wgs_reads)) %>%
+  filter(!is.na(singleton_norm_existing), !is.na(norm_tumor), !is.na(wgs)) %>%
   mutate(
-    abs_diff = abs(singleton_norm_existing - singleton_norm_by_wgs_reads),
-    rel_diff = abs_diff / pmax(
-      abs(singleton_norm_existing),
-      abs(singleton_norm_by_wgs_reads),
-      .Machine$double.eps
-    ),
-    within_tolerance = (
-      singleton_norm_existing == 0 & singleton_norm_by_wgs_reads == 0
-    ) | rel_diff <= singleton_rel_tol
+    raw_met = singleton_norm_existing * wgs,
+    raw_th  = norm_tumor * total_reads_tumor,
+    rel_diff = abs(raw_met - raw_th) /
+      pmax(abs(raw_met), abs(raw_th), .Machine$double.eps),
+    within_tolerance = (raw_met == 0 & raw_th == 0) | rel_diff <= singleton_rel_tol
   )
 
 failed_singleton_patients <- tumor_singleton_check %>%
   filter(!within_tolerance) %>%
   summarise(
-    n_failed_singleton_checks = n_distinct(singleton_col),
+    n_failed_singleton_checks = n_distinct(pattern),
     .by = c(patient_id, patient_code)
   )
 
 if (nrow(failed_singleton_patients) > 0) {
+  warning("TH-native tumor singleton norms disagree with the metastatic table for ",
+          nrow(failed_singleton_patients), " patient(s); inspect failed_singleton_patients.")
   print(failed_singleton_patients)
 }
 
-# Step 3: use the now-validated tumor values from the metastatic table directly
-tumor_singletons_existing <- met_red_edit_pat_code %>%
-  filter(!patient_code %in% failed_singleton_patients$patient_code) %>%
-  select(patient_code, all_of(singleton_norm_cols)) %>%
-  pivot_longer(
-    cols = all_of(singleton_norm_cols),
-    names_to = "singleton_col",
-    values_to = "singleton_norm_by_wgs_reads_tumor"
-  ) %>%
-  mutate(pattern = str_remove(singleton_col, "_singletons_norm_by_all_reads$")) %>%
-  select(tumor_code = patient_code, pattern, singleton_norm_by_wgs_reads_tumor) %>%
-  distinct()
-
-# Step 4: extract control singleton normalization from TH summary.
-# tel_content is spread across separate tumor/control rows per PID; fill() broadcasts
-# both values within each PID group before filtering down to the control row only.
-control_singletons <- th_singleton_results %>%
-  select(PID, sample, total_reads, tel_content, all_of(singleton_norm_cols)) %>%
-  mutate(
-    tumor_code = str_remove(PID, "-.*$"),
-    control_code = str_remove(PID, "^[^-]+-"),
-    sample_code = if_else(sample == "tumor", tumor_code, control_code),
-    tel_content_tumor = if_else(sample == "tumor", tel_content, NA_real_),
-    tel_content_control = if_else(sample == "control", tel_content, NA_real_)
-  ) %>%
-  group_by(tumor_code) %>%
-  fill(tel_content_tumor, tel_content_control, .direction = "downup") %>%
-  ungroup() %>%
-  filter(sample == "control") %>%
-  pivot_longer(
-    cols = all_of(singleton_norm_cols),
-    names_to = "singleton_col",
-    values_to = "singleton_norm_by_th_reads"
-  ) %>%
-  mutate(
-    pattern = str_remove(singleton_col, "_singletons_norm_by_all_reads$"),
-    singleton_count = singleton_norm_by_th_reads * total_reads
-  ) %>%
-  left_join(
-    total_reads_used_df %>%
-      select(sample_code = sample, wgs_total_reads_used = Total_reads_used),
-    by = "sample_code"
-  ) %>%
-  mutate(singleton_norm_by_wgs_reads_control = singleton_count / wgs_total_reads_used) %>%
-  group_by(tumor_code, pattern) %>%
-  summarise(
-    tel_content_tumor = first(na.omit(tel_content_tumor)),
-    tel_content_control = first(na.omit(tel_content_control)),
-    singleton_norm_by_wgs_reads_control = first(na.omit(singleton_norm_by_wgs_reads_control)),
-    .groups = "drop"
-  )
-
-# Step 5: compute singleton_dist = log2(tumor_norm / control_norm) - log2(tel_content_tumor / tel_content_control)
-singleton_dist_df <- tumor_singletons_existing %>%
-  left_join(control_singletons, by = c("tumor_code", "pattern")) %>%
+# Step 3: singleton_dist on the TH-native scale (filtered total_reads cancels).
+# Drop the few patients whose tumor counts are inconsistent between the metastatic table and
+# the TH summary (flagged above).
+singleton_dist_df <- singleton_dist_long %>%
+  filter(!tumor_code %in% failed_singleton_patients$patient_code) %>%
   mutate(
     singleton_dist = if_else(
-      singleton_norm_by_wgs_reads_tumor == 0 | singleton_norm_by_wgs_reads_control == 0,
+      norm_tumor == 0 | norm_control == 0 |
+        tel_content_tumor == 0 | tel_content_control == 0,
       NA_real_,
-      log2(singleton_norm_by_wgs_reads_tumor / singleton_norm_by_wgs_reads_control) -
-        log2(tel_content_tumor / tel_content_control)
+      log2(norm_tumor / norm_control) - log2(tel_content_tumor / tel_content_control)
     ),
     singleton_dist_col = paste0(pattern, "_singleton_dist")
   ) %>%
@@ -546,159 +498,6 @@ met_intrachrom <- total_reads_used %>%
   select(where(~ !all(is.na(.))), -patient_code, -Total_reads_used, -intrachromosomal_reads, -CATGGG_singletons_norm_by_all_reads, -CATGGG_singleton_dist)
 library(writexl)
 write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
-
-
-data <- met_intrachrom %>%
-  distinct(patient_id, .keep_all = TRUE) %>% 
-  select(patient_id, all_of(singleton_dist_cols), primary_tumor_type, tumor_tf_rate, blood_tf_rate) %>%
-  select(-CATGGG_singleton_dist) %>% 
-  filter(complete.cases(.)) %>% 
-  mutate(
-    primary_tumor_group = case_when(
-      primary_tumor_type == "Carcinoma" ~ "Carcinoma",
-      primary_tumor_type == "Melanoma" ~ "Melanoma",
-      str_detect(primary_tumor_type, regex("sarcoma", ignore_case = TRUE)) ~ "Sarcoma",
-      TRUE ~ "Other"
-    ),
-    primary_tumor_group = factor(
-      primary_tumor_group,
-      levels = c("Carcinoma", "Melanoma", "Sarcoma", "Other")
-    )
-  ) %>% 
-  mutate(primary_tumor_group = as.factor(primary_tumor_group))
-
-library(tidyverse)
-library(ggpubr)
-
-motif_long <- data %>%
-  pivot_longer(
-    cols = ends_with("_singleton_dist"),
-    names_to = "motif",
-    values_to = "singleton_dist"
-  ) %>%
-  mutate(
-    motif = str_remove(motif, "_singleton_dist"),
-    primary_tumor_group = fct_relevel(
-      primary_tumor_group,
-      "Carcinoma", "Melanoma", "Mesenchymal/Sarcoma", "Other"
-    )
-  )
-
-motif_tests <- motif_long %>%
-  group_by(motif) %>%
-  summarise(
-    n = n(),
-    p_kruskal = kruskal.test(singleton_dist ~ primary_tumor_group)$p.value,
-    .groups = "drop"
-  ) %>%
-  mutate(
-    p_adj = p.adjust(p_kruskal, method = "BH"),
-    label = paste0("BH p=", signif(p_adj, 2))
-  )
-
-plot_df <- motif_long %>%
-  left_join(motif_tests, by = "motif")
-
-ggplot(plot_df, aes(primary_tumor_group, singleton_dist, fill = primary_tumor_group)) +
-  geom_boxplot(outlier.shape = NA, alpha = 0.65, width = 0.65) +
-  geom_jitter(
-    aes(color = primary_tumor_group),
-    width = 0.18,
-    alpha = 0.25,
-    size = 0.7,
-    show.legend = FALSE
-  ) +
-  stat_summary(
-    fun = median,
-    geom = "point",
-    shape = 23,
-    size = 2.2,
-    fill = "white",
-    color = "black"
-  ) +
-  facet_wrap(~ motif, scales = "free_y", ncol = 3) +
-  scale_fill_brewer(palette = "Set2") +
-  scale_color_brewer(palette = "Set2") +
-  labs(
-    x = NULL,
-    y = "Singleton distance",
-    fill = "Primary tumor group",
-    title = "TVR singleton distance distributions by primary tumor group"
-  ) +
-  theme_bw() +
-  theme(
-    axis.text.x = element_text(angle = 35, hjust = 1),
-    strip.text = element_text(face = "bold"),
-    legend.position = "bottom"
-  )
-
-summary_df <- motif_long %>%
-  group_by(motif, primary_tumor_group) %>%
-  summarise(
-    n = n(),
-    median = median(singleton_dist, na.rm = TRUE),
-    q25 = quantile(singleton_dist, 0.25, na.rm = TRUE),
-    q75 = quantile(singleton_dist, 0.75, na.rm = TRUE),
-    .groups = "drop"
-  )
-
-ggplot(summary_df, aes(primary_tumor_group, median, color = primary_tumor_group)) +
-  geom_pointrange(aes(ymin = q25, ymax = q75), size = 0.7) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
-  facet_wrap(~ motif, scales = "free_y", ncol = 3) +
-  scale_color_brewer(palette = "Set2") +
-  labs(
-    x = NULL,
-    y = "Median singleton distance with IQR",
-    color = "Primary tumor group",
-    title = "Median TVR singleton distances by primary tumor group"
-  ) +
-  theme_bw() +
-  theme(
-    axis.text.x = element_text(angle = 35, hjust = 1),
-    strip.text = element_text(face = "bold"),
-    legend.position = "bottom"
-  )
-
-library(tidyverse)
-library(patchwork)
-
-singleton_vars <- c(
-  "ATAGGG_singleton_dist", "CTAGGG_singleton_dist", "GTAGGG_singleton_dist",
-  "TAAGGG_singleton_dist", "TCAGGG_singleton_dist", "TGAGGG_singleton_dist",
-  "TTCGGG_singleton_dist", "TTGGGG_singleton_dist", "TTTGGG_singleton_dist"
-)
-
-top_types <- data %>%
-  count(primary_tumor_type, sort = TRUE) %>%
-  slice_head(n = 8) %>%
-  pull(primary_tumor_type)
-
-plot_data <- data %>%
-  mutate(
-    tumor_tf_rate = log1p(tumor_tf_rate),
-    primary_tumor_type = if_else(primary_tumor_type %in% top_types,
-                                 primary_tumor_type, "Other")
-  )
-
-dep_plot <- function(v, response = "tumor_tf_rate") {
-  plot_data %>%
-    ggplot(aes(x = .data[[v]], y = .data[[response]], color = primary_tumor_type)) +
-    geom_point(alpha = 0.5, size = 1.2) +
-    geom_smooth(method = "loess", se = FALSE, color = "black", linewidth = 0.7) +
-    labs(x = v, y = response, color = NULL) +
-    theme_bw(base_size = 10) +
-    theme(legend.position = "none",
-          axis.title.x = element_text(size = 8))
-}
-
-plots <- map(singleton_vars, dep_plot)
-
-wrap_plots(plots, ncol = 3, guides = "collect") +
-  plot_annotation(title = "Singleton dist vs log1p(tumor_tf_rate) by cancer type") &
-  theme(legend.position = "bottom")
-
-
 
 
 
