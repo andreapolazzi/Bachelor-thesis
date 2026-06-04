@@ -14,6 +14,7 @@ library(tidyverse)
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 library(readxl, quietly = TRUE)
 library(here)
+source(here('scripts', 'useful_plots.R'))
 data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 summary(data)
 ```
@@ -67,147 +68,148 @@ corrplot::corrplot(
 # PCA with all features
 
 ```{r PCA_full}
-X <- scale(model_data_full[, -1])
-pca <- prcomp(X, center = TRUE)
-summary(pca)
-
-library(ggplot2)
-
-pca_df <- data.frame(
-  PC1 = pca$x[,1],
-  PC2 = pca$x[,2],
-  ALT = model_data_full$alt_status
-)
-
-ggplot(pca_df, aes(PC1, PC2, color = ALT)) +
-  geom_point(alpha = 0.6) +
-  theme_minimal() +
-  labs(
-    title = "PCA of all features",
-    x = "PC1",
-    y = "PC2"
-  )
-
-pca$rotation
+# model_data_full has alt_status as first column, features after
+res_full <- pca_plot(model_data_full, coloring = model_data_full$alt_status,
+                     title = "PCA of all features")
+res_full$plot
+summary(res_full$pca)
+res_full$pca$rotation
 ```
 
 ## Biplot
 
 ```{r biplot}
-# sample coordinates
-scores <- data.frame(
-  PC1 = pca$x[,1],
-  PC2 = pca$x[,2],
-  ALT = model_data_full$alt_status
-)
+feats_full <- colnames(model_data_full)[-1]
+comp_full  <- ifelse(grepl("singleton_dist", feats_full),
+                     sub("_singleton_dist", "", feats_full), feats_full)
 
-# motif vectors
-loadings <- data.frame(
-  PC1 = pca$rotation[,1],
-  PC2 = pca$rotation[,2],
-  comp_names = c(rownames(pca$rotation)[1:4], sapply(strsplit(rownames(pca$rotation)[5:13], split = '_', fixed = TRUE), `[`, 1))
-)
-
-# scale the loadings (smaller than sample coordinates) to make arrows more visible
-loadings$PC1 <- loadings$PC1 * 10
-loadings$PC2 <- loadings$PC2 * 10
-
-library(ggplot2)
-library(ggrepel)
-
-ggplot(scores, aes(PC1, PC2, color = ALT)) +
-  geom_point(alpha = 0.7, size = 2) +
-  geom_segment(data = loadings,
-               aes(x = 0, y = 0, xend = PC1, yend = PC2),
-               arrow = arrow(length = unit(0.25,"cm")),
-               inherit.aes = FALSE,
-               color = "black") +
-  geom_text_repel(data = loadings,
-            aes(x = PC1, y = PC2, label = comp_names),
-            inherit.aes = FALSE,
-            size = 3.5,
-            ) +
-  theme_bw() +
-  labs(
-    title = "PCA biplot of all features",
-    x = "PC1",
-    y = "PC2"
-  )
-ggsave(here('outputs', 'PCA_biplot_all.pdf'), width = 7, height = 6)
+bip_full <- pca_biplot(model_data_full, coloring = model_data_full$alt_status,
+                       scale_arrows = 10, compnames = comp_full,
+                       title = "PCA biplot of all features")
+bip_full$plot
+ggsave(here('outputs', 'PCA_biplot_all.pdf'), bip_full$plot, width = 7, height = 6)
 ```
 
 # PCA without TERT (more patients)
 
 ```{r pca-no-tert}
-X2 <- scale(model_data_large[, -c(1,2,3)])
-pca2 <- prcomp(X2, center = TRUE, scale. = TRUE)
-summary(pca2)
+# drop the id/cancer_type columns so alt_status is the first (label) column
+large_pca <- model_data_large %>% select(-donor_id, -cancer_type)
 
-library(ggplot2)
-
-pca_df2 <- data.frame(
-  PC1 = pca2$x[,1],
-  PC2 = pca2$x[,2],
-  ALT = model_data_large$alt_status
-)
-
-ggplot(pca_df2, aes(PC1, PC2, color = ALT)) +
-  geom_point(alpha = 0.6) +
-  theme_minimal() +
-  labs(
-    title = "PCA without TERT - more patients (1943)",
-    x = "PC1",
-    y = "PC2"
-  )
-
-pca2$rotation
+res_large <- pca_plot(large_pca, coloring = large_pca$alt_status,
+                      title = "PCA without TERT - more patients (1943)")
+res_large$plot
+summary(res_large$pca)
+res_large$pca$rotation
 ```
 
 ## Biplot
 
 ```{r biplot-no-tert}
-# sample coordinates
-scores2 <- data.frame(
-  PC1 = pca2$x[,1],
-  PC2 = pca2$x[,2],
-  ALT = model_data_large$alt_status
-)
+feats_large <- colnames(large_pca)[-1]
+comp_large  <- ifelse(grepl("singleton_dist", feats_large),
+                      sub("_singleton_dist", "", feats_large), feats_large)
 
-# motif vectors
-loadings2 <- data.frame(
-  PC1 = pca2$rotation[,1],
-  PC2 = pca2$rotation[,2],
-  comp_names = c(rownames(pca2$rotation)[1:3], sapply(strsplit(rownames(pca2$rotation)[4:12], split = '_', fixed = TRUE), `[`, 1))
-)
-
-# scale the loadings (smaller than sample coordinates) to make arrows more visible
-loadings2$PC1 <- loadings2$PC1 * 18
-loadings2$PC2 <- loadings2$PC2 * 18
-
-library(ggplot2)
-library(ggrepel)
-
-ggplot(scores2, aes(PC1, PC2, color = ALT)) +
-  geom_point(alpha = 0.7, size = 2) +
-  geom_segment(data = loadings2,
-               aes(x = 0, y = 0, xend = PC1, yend = PC2),
-               arrow = arrow(length = unit(0.25,"cm")),
-               inherit.aes = FALSE,
-               color = "black") +
-  geom_text_repel(data = loadings2,
-            aes(x = PC1, y = PC2, label = comp_names),
-            inherit.aes = FALSE,
-            size = 3.5,
-            ) +
-  theme_bw() +
-  labs(
-    title = "PCA without TERT - more patients (1943)",
-    x = "PC1",
-    y = "PC2"
-  )
-
-ggsave(here('outputs', 'PCA_biplot_no_TERT.pdf'), width = 7, height = 6)
+bip_large <- pca_biplot(large_pca, coloring = large_pca$alt_status,
+                        scale_arrows = 18, compnames = comp_large,
+                        title = "PCA without TERT - more patients (1943)")
+bip_large$plot
+ggsave(here('outputs', 'PCA_biplot_no_TERT.pdf'), bip_large$plot, width = 7, height = 6)
 ```
+
+# PCA Mesenchymal groups
+
+Here we repeat the PCA on the full set of telomere features, but label the samples by **mesenchymal grouping** (`cancer_group`: Mesenchymal vs Non-Mesenchymal origin) instead of ALT status. We use the processed dataset which carries this annotation.
+
+```{r mesench-data}
+mesench_raw <- read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
+
+# all telomere features (everything numeric except the metadata/label columns)
+mesench_features <- c(
+  "tf_primary_rate",
+  "tf_blood_rate",
+  "telomere_insertion_rate",
+  "telomere_content_log2",
+  "TERT_FPKM",
+  "ATAGGG_singleton_dist",
+  "CTAGGG_singleton_dist",
+  "GTAGGG_singleton_dist",
+  "TAAGGG_singleton_dist",
+  "TCAGGG_singleton_dist",
+  "TGAGGG_singleton_dist",
+  "TTCGGG_singleton_dist",
+  "TTGGGG_singleton_dist",
+  "TTTGGG_singleton_dist"
+)
+
+mesench_data <- mesench_raw %>%
+  mutate(cancer_group = factor(cancer_group))
+```
+
+## With TERT (complete telomere annotation)
+
+Including TERT_FPKM requires dropping samples with missing expression, leaving a smaller subset.
+
+```{r pca-mesench-tert}
+# cancer_group as first (label) column, features after
+mesench_full <- mesench_data %>%
+  select(cancer_group, all_of(mesench_features)) %>%
+  drop_na()
+
+res_m <- pca_plot(mesench_full, coloring = mesench_full$cancer_group,
+                  title = paste0("PCA of all features (with TERT) - mesenchymal grouping (n = ",
+                                 nrow(mesench_full), ")"))
+res_m$plot
+summary(res_m$pca)
+ggsave(here('outputs', 'PCA_mesenchymal_all.pdf'), res_m$plot, width = 7, height = 6)
+```
+
+### Biplot
+
+```{r biplot-mesench-tert}
+comp_m <- ifelse(grepl("singleton_dist", mesench_features),
+                 sub("_singleton_dist", "", mesench_features), mesench_features)
+
+bip_m <- pca_biplot(mesench_full, coloring = mesench_full$cancer_group,
+                    scale_arrows = 10, compnames = comp_m,
+                    title = "PCA biplot (with TERT) - mesenchymal grouping")
+bip_m$plot
+ggsave(here('outputs', 'PCA_biplot_mesenchymal_all.pdf'), bip_m$plot, width = 7, height = 6)
+```
+
+## Without TERT (more samples)
+
+Dropping TERT_FPKM keeps many more samples.
+
+```{r pca-mesench-no-tert}
+mesench_features_noT <- setdiff(mesench_features, "TERT_FPKM")
+
+mesench_large <- mesench_data %>%
+  select(cancer_group, all_of(mesench_features_noT)) %>%
+  drop_na()
+
+res_m2 <- pca_plot(mesench_large, coloring = mesench_large$cancer_group,
+                   title = paste0("PCA without TERT - mesenchymal grouping (n = ",
+                                  nrow(mesench_large), ")"))
+res_m2$plot
+summary(res_m2$pca)
+ggsave(here('outputs', 'PCA_mesenchymal_no_TERT.pdf'), res_m2$plot, width = 7, height = 6)
+```
+
+### Biplot
+
+```{r biplot-mesench-no-tert}
+comp_m2 <- ifelse(grepl("singleton_dist", mesench_features_noT),
+                  sub("_singleton_dist", "", mesench_features_noT), mesench_features_noT)
+
+bip_m2 <- pca_biplot(mesench_large, coloring = mesench_large$cancer_group,
+                     scale_arrows = 18, compnames = comp_m2,
+                     title = "PCA biplot without TERT - mesenchymal grouping")
+bip_m2$plot
+ggsave(here('outputs', 'PCA_biplot_mesenchymal_no_TERT.pdf'), bip_m2$plot, width = 7, height = 6)
+```
+
+
 
 # Split the dataset
 
