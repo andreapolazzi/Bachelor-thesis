@@ -502,12 +502,13 @@ write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edit_single
 
 
 # Cancer grouping ####
+## Primary ####
 data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 mes_ori <- c('Bone-Epith', 'Bone-Osteosarc', 'CNS-LGG', 'CNS-PiloAstro', 'Panc-Endocrine', 'SoftTissue-Leiomyo', 'SoftTissue-Liposarc')
 nonmes_ori <- setdiff(unique(data$cancer_type), mes_ori)
 
-mesenchymal_grouping <- data %>% 
+mesenchymal_grouping_prim <- data %>% 
   mutate(cancer_group =
     case_when(
       cancer_type %in% mes_ori ~ 'Mesenchymal_origin',
@@ -519,6 +520,22 @@ mesenchymal_grouping <- data %>%
 write_xlsx(mesenchymal_grouping, here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 
+## Metastatic ####
+data <- readxl::read_xlsx(here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
+
+ori_data <- readxl::read_xlsx(here('data','raw', 'Hartwig_mesenchimal.xlsx'))
+
+mesenchymal_grouping_met <- data %>% 
+  left_join(ori_data, join_by(mixed_def == Cancer_type)) %>% 
+  rename(tumor_origin = 'Mesenchimal_origin?') %>% 
+  relocate(tumor_origin, .after = cancer_type) %>%
+  mutate(tumor_origin = case_when(
+    tumor_origin == 'Mesenchimal' ~ 'Mesenchymal',
+    tumor_origin == 'Non_mesenchimal' ~ 'Non_mesenchymal',
+    TRUE ~ tumor_origin
+  ))
+
+writexl::write_xlsx(mesenchymal_grouping_met, here('data', 'processed', 'metastatic_red_edit_mesenchymal.xlsx'))
 
 
 
@@ -584,4 +601,5 @@ print(missing_from_genes)
 
 library(writexl)
 write_xlsx(data_primary_genes, here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
+
 

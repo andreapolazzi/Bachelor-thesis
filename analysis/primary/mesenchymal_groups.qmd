@@ -264,7 +264,7 @@ for (v in continuous_vars) {
 
 The confounder is ALT composition: - Telomere insertion is essentially
 an ALT phenomenon: in ALT-low \~75–94% of samples are exactly 0; in
-ALT-high the median jumps to \~0.07–0.10. \
+ALT-high the median jumps to \~0.07–0.10.\
 \
 Mesenchymal is hugely ALT-enriched: 37.5% ALT-high (81/216) vs only 4.9%
 (84/1726) in non-mesenchymal.
