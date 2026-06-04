@@ -14,7 +14,6 @@ pca_plot <- function(pca_data, coloring = pca_data[[1]], title = 'PCA'){
   p <- ggplot(pca_df, aes(PC1, PC2, color = coloring)) +
         geom_point(alpha = 0.6) +
         theme_bw() +
-        coord_equal() +
         labs(x = paste0("PC1 (", round(var_explained[1]*100,1), "%)"),
              y = paste0("PC2 (", round(var_explained[2]*100,1), "%)"),
              title = title)
@@ -60,7 +59,6 @@ pca_biplot <- function(pca_data, coloring = pca_data[[1]], scale_arrows = 10, co
                           size = 3.5,
           ) +
           theme_bw() +
-          coord_equal() +
           labs(
             title = title,
             x = paste0("PC1 (", round(var_explained[1]*100,1), "%)"),
