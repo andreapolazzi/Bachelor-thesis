@@ -604,11 +604,10 @@ left_join(
   kable()
 ```
 
-# TTTGGG depletion by cancer type
+# TTTGGG low values by cancer type (one-vs-rest)
 
-```{r tttggg-enrichment}
+```{r tttggg-tests}
 tttggg_min_n <- 10
-tttggg_depletion_threshold <- 0
 
 tttggg_data <- bind_rows(
   primary %>%
@@ -624,72 +623,45 @@ tttggg_data <- bind_rows(
   mutate(n_cancer_type = n()) %>%
   ungroup() %>%
   filter(n_cancer_type >= tttggg_min_n) %>%
-  mutate(
-    cohort = factor(cohort, levels = c("Primary", "Metastatic")),
-    depleted_TTTGGG = TTTGGG_singleton_dist < tttggg_depletion_threshold
-  )
+  mutate(cohort = factor(cohort, levels = c("Primary", "Metastatic")))
 
-tttggg_kw <- tttggg_data %>%
+# One-vs-rest Wilcoxon rank-sum, one-sided lower tail: is this cancer type
+# shifted to LOWER TTTGGG_singleton_dist than all other cancer types in the same
+# cohort? Continuous test on the raw log2 ratio — no dichotomization, so the
+# magnitude of the shift drives the result. Effect size is the rank-biserial
+# correlation (positive = lower than the rest of the cohort). BH correction is
+# applied separately within each cohort.
+tttggg_tests <- tttggg_data %>%
   group_by(cohort) %>%
-  summarise(
-    n = n(),
-    n_cancer_types = n_distinct(cancer_type),
-    p_kw = kruskal.test(TTTGGG_singleton_dist ~ cancer_type)$p.value,
-    .groups = "drop"
-  )
-
-tttggg_summary <- tttggg_data %>%
-  group_by(cohort, cancer_type) %>%
-  summarise(
-    n = n(),
-    median = median(TTTGGG_singleton_dist),
-    q25 = quantile(TTTGGG_singleton_dist, 0.25),
-    q75 = quantile(TTTGGG_singleton_dist, 0.75),
-    depleted_n = sum(depleted_TTTGGG),
-    depleted_rate = depleted_n / n,
-    .groups = "drop"
-  ) %>%
-  group_by(cohort) %>%
-  mutate(
-    cohort_n = sum(n),
-    cohort_depleted_n = sum(depleted_n),
-    cohort_depleted_rate = cohort_depleted_n / cohort_n
-  ) %>%
-  rowwise() %>%
-  mutate(
-    fisher = list(fisher.test(
-      matrix(
-        c(
-          depleted_n,
-          n - depleted_n,
-          cohort_depleted_n - depleted_n,
-          (cohort_n - n) - (cohort_depleted_n - depleted_n)
-        ),
-        nrow = 2,
-        byrow = TRUE
-      ),
-      alternative = "greater"
-    )),
-    odds_ratio = as.numeric(fisher$estimate),
-    p_enrich = fisher$p.value
-  ) %>%
+  group_modify(~ {
+    df <- .x
+    map_dfr(unique(df$cancer_type), function(ct) {
+      a <- df$TTTGGG_singleton_dist[df$cancer_type == ct]
+      b <- df$TTTGGG_singleton_dist[df$cancer_type != ct]
+      wt <- wilcox.test(a, b, alternative = "less")
+      tibble(
+        cancer_type   = ct,
+        n             = length(a),
+        median        = median(a),
+        rest_median   = median(b),
+        median_diff   = median(a) - median(b),
+        rank_biserial = 1 - 2 * unname(wt$statistic) / (length(a) * length(b)),
+        p_low         = wt$p.value
+      )
+    })
+  }) %>%
   ungroup() %>%
   group_by(cohort) %>%
   mutate(
-    p_enrich_adj = p.adjust(p_enrich, method = "BH"),
-    depletion_signal = case_when(
-      p_enrich_adj < 0.05 ~ "enriched vs rest",
-      TRUE ~ "not significant"
-    )
+    p_low_adj = p.adjust(p_low, method = "BH"),
+    low_signal = if_else(p_low_adj < 0.05, "lower than rest", "not significant")
   ) %>%
   ungroup() %>%
-  select(-fisher) %>%
   arrange(cohort, median)
 
 tttggg_plot_data <- tttggg_data %>%
   left_join(
-    tttggg_summary %>%
-      select(cohort, cancer_type, n, median, depletion_signal),
+    tttggg_tests %>% select(cohort, cancer_type, n, median, low_signal),
     by = c("cohort", "cancer_type")
   ) %>%
   mutate(
@@ -701,19 +673,13 @@ tttggg_plot_data <- tttggg_data %>%
   )
 ```
 
-`TTTGGG_singleton_dist` is a log2 tumor/control ratio normalized by telomere content. The analysis keeps cancer types with at least `r tttggg_min_n` samples in the corresponding cohort and defines depletion as `TTTGGG_singleton_dist <` `r tttggg_depletion_threshold`. The plot shows the full continuous values, ordered within each cohort by the cancer-type median.
-
-For each cancer type, Fisher's exact test asks whether the fraction of samples below the selected threshold is enriched compared with all other cancer types in the same cohort. Benjamini-Hochberg correction is applied separately within each cohort.
+`TTTGGG_singleton_dist` is a log2 tumor/control ratio normalized by telomere content. The analysis keeps cancer types with at least `r tttggg_min_n` samples in the corresponding cohort. For each cancer type, a one-sided Wilcoxon rank-sum test asks whether its `TTTGGG_singleton_dist` values are **shifted lower** than all other cancer types in the same cohort, using the raw continuous values (no threshold). The rank-biserial correlation reports the effect size (positive = lower than the rest), and Benjamini-Hochberg correction is applied separately within each cohort. The dashed line at 0 marks no tumor/control difference and is a visual reference only.
 
 ```{r tttggg-cancer-type-rank-plot, fig.width = 18, fig.height = 10}
 ggplot(tttggg_plot_data, aes(cancer_type_ordered, TTTGGG_singleton_dist)) +
-  geom_hline(
-    yintercept = tttggg_depletion_threshold,
-    linetype = "dashed",
-    color = "firebrick"
-  ) +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
   geom_point(
-    aes(color = depleted_TTTGGG),
+    aes(color = low_signal),
     position = position_jitter(width = 0.22, height = 0),
     alpha = 0.35,
     size = 0.75,
@@ -727,15 +693,15 @@ ggplot(tttggg_plot_data, aes(cancer_type_ordered, TTTGGG_singleton_dist)) +
     color = "black"
   ) +
   facet_wrap(~ cohort, scales = "free_x", ncol = 1) +
-  scale_color_manual(values = c("FALSE" = "grey65", "TRUE" = "firebrick")) +
+  scale_color_manual(values = c("lower than rest" = "firebrick", "not significant" = "grey65")) +
   scale_x_discrete(labels = \(x) str_remove(x, "^.*___")) +
   labs(
     x = NULL,
     y = "TTTGGG singleton_dist log2(tumor/control)",
-    title = "TTTGGG depletion by cancer type",
+    title = "TTTGGG by cancer type — ordered by median, lower-tail test highlighted",
     subtitle = paste0(
       "Cancer types with n >= ", tttggg_min_n,
-      "; dashed line marks depletion threshold = ", tttggg_depletion_threshold
+      "; red = significantly lower than rest of cohort (one-vs-rest Wilcoxon, BH < 0.05)"
     )
   ) +
   theme_bw() +
@@ -745,55 +711,48 @@ ggplot(tttggg_plot_data, aes(cancer_type_ordered, TTTGGG_singleton_dist)) +
   )
 ```
 
-```{r tttggg-depleted-rate-plot, fig.width = 15, fig.height = 9}
+```{r tttggg-effect-size-plot, fig.width = 15, fig.height = 9}
 ggplot(
-  tttggg_summary,
+  tttggg_tests,
   aes(
-    x = depleted_rate,
-    y = fct_reorder(paste0(cancer_type, " (n=", n, ")"), depleted_rate)
+    x = median_diff,
+    y = fct_reorder(paste0(cancer_type, " (n=", n, ")"), median_diff, .desc = TRUE)
   )
 ) +
-  geom_vline(
-    aes(xintercept = cohort_depleted_rate),
-    linetype = "dashed",
-    color = "grey35"
-  ) +
-  geom_col(aes(fill = depletion_signal), width = 0.72) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey35") +
+  geom_col(aes(fill = low_signal), width = 0.72) +
   facet_wrap(~ cohort, scales = "free_y", ncol = 2) +
-  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
   scale_fill_manual(
     values = c(
-      "enriched vs rest" = "firebrick",
+      "lower than rest" = "firebrick",
       "not significant" = "grey75"
     )
   ) +
   labs(
-    x = paste0("Fraction with TTTGGG singleton_dist < ", tttggg_depletion_threshold),
+    x = "Median TTTGGG singleton_dist relative to rest of cohort (log2)",
     y = NULL,
     fill = "Signal",
-    title = "Cancer-type enrichment for TTTGGG depletion",
+    title = "How much lower is each cancer type's TTTGGG vs the rest of its cohort",
     subtitle = paste0(
       "Cancer types with n >= ", tttggg_min_n,
-      "; dashed line is the cohort-wide depletion fraction"
+      "; negative = lower than cohort rest. Red = one-vs-rest Wilcoxon BH < 0.05"
     )
   ) +
   theme_bw() +
   theme(legend.position = "bottom")
 ```
 
-```{r tttggg-depletion-table}
-tttggg_summary %>%
+```{r tttggg-test-table}
+tttggg_tests %>%
   select(
-    cohort, cancer_type, n, median, q25, q75,
-    depleted_n, depleted_rate, cohort_depleted_rate,
-    odds_ratio, p_enrich, p_enrich_adj, depletion_signal
+    cohort, cancer_type, n, median, rest_median, median_diff,
+    rank_biserial, p_low, p_low_adj, low_signal
   ) %>%
   mutate(
-    across(c(median, q25, q75), \(x) round(x, 3)),
-    across(c(depleted_rate, cohort_depleted_rate), \(x) scales::percent(x, accuracy = 0.1)),
-    odds_ratio = round(odds_ratio, 2),
-    p_enrich = signif(p_enrich, 3),
-    p_enrich_adj = signif(p_enrich_adj, 3)
+    across(c(median, rest_median, median_diff, rank_biserial), \(x) round(x, 3)),
+    p_low = signif(p_low, 3),
+    p_low_adj = signif(p_low_adj, 3)
   ) %>%
-  kable(caption = "TTTGGG depletion by cancer type in primary and metastatic cohorts")
+  arrange(cohort, p_low_adj) %>%
+  kable(caption = "TTTGGG one-vs-rest lower-tail Wilcoxon by cancer type (primary and metastatic)")
 ```
