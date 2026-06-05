@@ -14,6 +14,12 @@ library(tidyverse)
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 library(readxl, quietly = TRUE)
 library(here)
+library(randomForest, quietly = TRUE)
+library(caret, quietly = TRUE)
+library(pROC, quietly = TRUE)
+library(treeshap, quietly = TRUE)
+library(shapviz, quietly = TRUE)
+library(patchwork, quietly = TRUE)
 source(here('scripts', 'useful_plots.R'))
 data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 summary(data)
@@ -32,7 +38,9 @@ summary(clean_data)
 We must account for the fact that we have many **NA values**, especially in the **TERT_FPKM column**. These rows must be excluded, since further analyses such as PCA or RF require the absence of missing values. Therefore this extended model will use a subset of samples with complete **telomere biology annotations**.
 
 ```{r model-data-full}
-model_data_full <- clean_data[complete.cases(clean_data),-c(1,2)]
+model_data_full_rows <- complete.cases(clean_data)
+model_data_full <- clean_data[model_data_full_rows,-c(1,2)]
+model_data_full_meta <- clean_data[model_data_full_rows,c("donor_id", "cancer_type")]
 summary(model_data_full)
 ```
 
@@ -330,6 +338,179 @@ With this fold, the RF model achieved **slightly worse performances** with respe
 
 ```{r feature-importance}
 varImpPlot(rf_model_full, main = 'Variable importance plot - Random Forest (all features)' )
+```
+
+# TreeSHAP interpretation: Random Forest
+
+As in the tTF regression notebooks, we estimate out-of-fold TreeSHAP values so that each sample is explained by a model that did not train on that sample. For the binary classifier, the SHAP values explain the RF probability assigned to the **ALT-high** class.
+
+```{r treeshap-rf-cv, message=FALSE, warning=FALSE}
+clean_data_shap <- model_data_full %>%
+  mutate(
+    alt_status_rf = factor(
+      if_else(alt_status == "ALT-high", 1, 0),
+      levels = c(0, 1)
+    )
+  ) %>%
+  select(-alt_status)
+
+k <- 5
+shap_list <- list()
+
+set.seed(21)
+fold_list <- createFolds(
+  clean_data_shap$alt_status_rf,
+  k = k,
+  returnTrain = FALSE
+)
+folds <- integer(nrow(clean_data_shap))
+for (i in seq_along(fold_list)) folds[fold_list[[i]]] <- i
+
+for (i in 1:k) {
+  fold_train      <- clean_data_shap[folds != i, ]
+  fold_test       <- clean_data_shap[folds == i, ]
+  fold_train_shap <- fold_train %>% select(-alt_status_rf)
+  fold_test_shap  <- fold_test  %>% select(-alt_status_rf)
+  
+  fit_rf_fold <- randomForest(
+    alt_status_rf ~ .,
+    data = fold_train,
+    ntree = 500,
+    importance = TRUE
+  )
+  unified_fold <- randomForest.unify(fit_rf_fold, fold_train_shap)
+  shap_fold    <- treeshap(unified_fold, fold_test_shap, verbose = FALSE)
+  
+  shap_list[[i]] <- list(
+    shap     = shap_fold$shaps,
+    X        = fold_test_shap,
+    prob     = predict(fit_rf_fold, fold_test_shap, type = "prob")[, "1"],
+    baseline = rep(
+      mean(predict(fit_rf_fold, fold_train_shap, type = "prob")[, "1"]),
+      nrow(fold_test_shap)
+    ),
+    row_id   = which(folds == i)
+  )
+}
+
+shap_matrix <- bind_rows(lapply(shap_list, `[[`, "shap"))
+X_matrix    <- bind_rows(lapply(shap_list, `[[`, "X"))
+rf_oof_prob <- unlist(lapply(shap_list, `[[`, "prob"))
+baseline    <- unlist(lapply(shap_list, `[[`, "baseline"))
+row_ids     <- unlist(lapply(shap_list, `[[`, "row_id"))
+ord         <- order(row_ids)
+
+shap_matrix <- shap_matrix[ord, ]
+X_matrix    <- X_matrix[ord, ]
+rf_oof_prob <- rf_oof_prob[ord]
+baseline    <- baseline[ord]
+
+stopifnot(nrow(shap_matrix) == nrow(model_data_full))
+stopifnot(nrow(X_matrix) == nrow(model_data_full))
+
+shap_meta <- model_data_full_meta %>%
+  mutate(
+    alt_status = model_data_full$alt_status,
+    cancer_type = fct_lump_n(factor(cancer_type), n = 8),
+    rf_prob_alt_high = rf_oof_prob,
+    baseline = baseline
+  )
+
+sv_oof_rf <- shapviz(
+  object   = as.matrix(shap_matrix),
+  X        = X_matrix,
+  baseline = mean(baseline)
+)
+
+rf_shap_importance <- shap_matrix %>%
+  summarise(across(everything(), ~ mean(abs(.x)))) %>%
+  pivot_longer(everything(), names_to = "feature", values_to = "mean_abs_shap") %>%
+  arrange(desc(mean_abs_shap))
+
+rf_shap_importance
+
+max(abs(rowSums(shap_matrix) + baseline - rf_oof_prob))
+```
+
+```{r treeshap-rf-plots, message=FALSE, warning=FALSE}
+dep_by_alt <- function(v) {
+  tibble(
+    feature_value = X_matrix[[v]],
+    shap_value    = shap_matrix[[v]],
+    alt_status    = shap_meta$alt_status
+  ) %>%
+    ggplot(aes(feature_value, shap_value, color = alt_status)) +
+    geom_point(alpha = 0.7, size = 1.5) +
+    labs(x = v, y = paste("SHAP value for", v), color = "ALT status") +
+    theme_bw()
+}
+
+dep_by_cancer <- function(v) {
+  tibble(
+    feature_value = X_matrix[[v]],
+    shap_value    = shap_matrix[[v]],
+    cancer_type   = shap_meta$cancer_type
+  ) %>%
+    ggplot(aes(feature_value, shap_value, color = cancer_type)) +
+    geom_point(alpha = 0.7, size = 1.5) +
+    labs(x = v, y = paste("SHAP value for", v), color = "Cancer type") +
+    theme_bw()
+}
+
+sv_importance(sv_oof_rf, kind = "beeswarm", bee_adjust = 20, alpha = 0.8) +
+  theme_bw()
+
+dep_by_alt("telomere_content_log2")
+
+dep_by_alt("telomere_insertion_rate")
+
+dep_by_alt("tf_rate")
+
+dep_by_alt("TERT_FPKM")
+
+dep_by_cancer("telomere_content_log2")
+```
+
+```{r treeshap-rf-singletons, message=FALSE, warning=FALSE}
+singleton_vars <- c(
+  "ATAGGG_singleton_dist",
+  "CTAGGG_singleton_dist",
+  "GTAGGG_singleton_dist",
+  "TAAGGG_singleton_dist",
+  "TCAGGG_singleton_dist",
+  "TGAGGG_singleton_dist",
+  "TTCGGG_singleton_dist",
+  "TTGGGG_singleton_dist",
+  "TTTGGG_singleton_dist"
+)
+
+singleton_plots_alt <- purrr::map(
+  singleton_vars,
+  \(v) {
+    dep_by_alt(v) +
+      theme(
+        plot.title = element_text(size = 10),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 7)
+      )
+  }
+)
+wrap_plots(singleton_plots_alt, ncol = 3, guides = "collect") +
+  plot_annotation(title = "***GGG singleton SHAP dependence")
+
+singleton_plots_cancer <- purrr::map(
+  singleton_vars,
+  \(v) {
+    dep_by_cancer(v) +
+      theme(
+        plot.title = element_text(size = 10),
+        axis.title = element_text(size = 10),
+        axis.text = element_text(size = 7)
+      )
+  }
+)
+wrap_plots(singleton_plots_cancer, ncol = 3, guides = "collect") +
+  plot_annotation(title = "***GGG singleton SHAP dependence by cancer type")
 ```
 
 # Cross Validation of the performances
