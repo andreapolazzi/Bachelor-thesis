@@ -319,7 +319,6 @@ ggplot(motif_long, aes(primary_tumor_group, singleton_dist, fill = primary_tumor
   )
 ```
 
-
 # Singleton-distribution differences in top-tTF samples — Primary vs Metastatic
 
 ```{r setup-topTF}
@@ -419,21 +418,11 @@ plot_motifs <- function(df, res, title) {
 }
 ```
 
-This analysis runs the **same comparison independently** in the primary
-(PCAWG) and metastatic cohorts: for each of the 9 telomere variant
-repeat (TVR) motifs, does the per-sample `singleton_dist` value differ
-between the highest-TF-rate samples and the rest? The two datasets are
-reported side by side so any shared pattern can be judged by eye — there
-is **no automated cross-dataset test**.
+This analysis runs the **same comparison independently** in the primary (PCAWG) and metastatic cohorts: for each of the 9 telomere variant repeat (TVR) motifs, does the per-sample `singleton_dist` value differ between the highest-TF-rate samples and the rest? The two datasets are reported side by side so any shared pattern can be judged by eye — there is **no automated cross-dataset test**.
 
--   **Test:** Wilcoxon rank-sum (Mann–Whitney), `top` vs `rest`, on the
-    raw `singleton_dist` value.
--   **Top group:** highest 5% and highest 10% of tumour TF rate (tTF:
-    `tf_primary_rate` in primary, `tumor_tf_rate` in metastatic),
-    reported separately.
--   **Multiple testing:** Benjamini–Hochberg FDR across the 9 motifs,
-    applied within each dataset × threshold block. Each dataset is
-    corrected on its own.
+-   **Test:** Wilcoxon rank-sum (Mann–Whitney), `top` vs `rest`, on the raw `singleton_dist` value.
+-   **Top group:** highest 5% and highest 10% of tumour TF rate (tTF: `tf_primary_rate` in primary, `tumor_tf_rate` in metastatic), reported separately.
+-   **Multiple testing:** Benjamini–Hochberg FDR across the 9 motifs, applied within each dataset × threshold block. Each dataset is corrected on its own.
 -   **Direction:** `median_diff = median(top) − median(rest)`.
 
 ```{r assign-groups}
@@ -493,17 +482,11 @@ plot_motifs(meta_10, res_meta_10, "Metastatic — singleton_dist, top 10% tTF vs
 
 # Singleton-distribution differences in top-bTF samples — Primary vs Metastatic
 
-Same analysis as above but stratifying by **blood TF rate** (bTF:
-`tf_blood_rate` in primary, `blood_tf_rate` in metastatic).
+Same analysis as above but stratifying by **blood TF rate** (bTF: `tf_blood_rate` in primary, `blood_tf_rate` in metastatic).
 
--   **Test:** Wilcoxon rank-sum (Mann–Whitney), `top` vs `rest`, on the
-    raw `singleton_dist` value.
--   **Top group:** highest 5% and highest 10% of blood TF rate (bTF:
-    `tf_blood_rate` in primary, `blood_tf_rate` in metastatic),
-    reported separately.
--   **Multiple testing:** Benjamini–Hochberg FDR across the 9 motifs,
-    applied within each dataset × threshold block. Each dataset is
-    corrected on its own.
+-   **Test:** Wilcoxon rank-sum (Mann–Whitney), `top` vs `rest`, on the raw `singleton_dist` value.
+-   **Top group:** highest 5% and highest 10% of blood TF rate (bTF: `tf_blood_rate` in primary, `blood_tf_rate` in metastatic), reported separately.
+-   **Multiple testing:** Benjamini–Hochberg FDR across the 9 motifs, applied within each dataset × threshold block. Each dataset is corrected on its own.
 -   **Direction:** `median_diff = median(top) − median(rest)`.
 
 ```{r assign-groups-bTF}
@@ -563,8 +546,7 @@ plot_motifs(meta_b10, res_meta_b10, "Metastatic — singleton_dist, top 10% bTF 
 
 # Final comparison — primary vs metastatic
 
-`diff` = `median(top) − median(rest)`; `p.adj` are BH-corrected within
-each cohort × stratification block.
+`diff` = `median(top) − median(rest)`; `p.adj` are BH-corrected within each cohort × stratification block.
 
 ## tTF
 
@@ -620,4 +602,198 @@ left_join(
   mutate(across(c(prim_diff, meta_diff), \(x) round(x, 3)),
          across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) |>
   kable()
+```
+
+# TTTGGG depletion by cancer type
+
+```{r tttggg-enrichment}
+tttggg_min_n <- 10
+tttggg_depletion_threshold <- 0
+
+tttggg_data <- bind_rows(
+  primary %>%
+    select(sample_id = donor_id, cancer_type, TTTGGG_singleton_dist) %>%
+    mutate(cohort = "Primary"),
+  met_intrachrom %>%
+    distinct(patient_id, .keep_all = TRUE) %>%
+    select(sample_id = patient_id, cancer_type, TTTGGG_singleton_dist) %>%
+    mutate(cohort = "Metastatic")
+) %>%
+  filter(!is.na(TTTGGG_singleton_dist), !is.na(cancer_type)) %>%
+  group_by(cohort, cancer_type) %>%
+  mutate(n_cancer_type = n()) %>%
+  ungroup() %>%
+  filter(n_cancer_type >= tttggg_min_n) %>%
+  mutate(
+    cohort = factor(cohort, levels = c("Primary", "Metastatic")),
+    depleted_TTTGGG = TTTGGG_singleton_dist < tttggg_depletion_threshold
+  )
+
+tttggg_kw <- tttggg_data %>%
+  group_by(cohort) %>%
+  summarise(
+    n = n(),
+    n_cancer_types = n_distinct(cancer_type),
+    p_kw = kruskal.test(TTTGGG_singleton_dist ~ cancer_type)$p.value,
+    .groups = "drop"
+  )
+
+tttggg_summary <- tttggg_data %>%
+  group_by(cohort, cancer_type) %>%
+  summarise(
+    n = n(),
+    median = median(TTTGGG_singleton_dist),
+    q25 = quantile(TTTGGG_singleton_dist, 0.25),
+    q75 = quantile(TTTGGG_singleton_dist, 0.75),
+    depleted_n = sum(depleted_TTTGGG),
+    depleted_rate = depleted_n / n,
+    .groups = "drop"
+  ) %>%
+  group_by(cohort) %>%
+  mutate(
+    cohort_n = sum(n),
+    cohort_depleted_n = sum(depleted_n),
+    cohort_depleted_rate = cohort_depleted_n / cohort_n
+  ) %>%
+  rowwise() %>%
+  mutate(
+    fisher = list(fisher.test(
+      matrix(
+        c(
+          depleted_n,
+          n - depleted_n,
+          cohort_depleted_n - depleted_n,
+          (cohort_n - n) - (cohort_depleted_n - depleted_n)
+        ),
+        nrow = 2,
+        byrow = TRUE
+      ),
+      alternative = "greater"
+    )),
+    odds_ratio = as.numeric(fisher$estimate),
+    p_enrich = fisher$p.value
+  ) %>%
+  ungroup() %>%
+  group_by(cohort) %>%
+  mutate(
+    p_enrich_adj = p.adjust(p_enrich, method = "BH"),
+    depletion_signal = case_when(
+      p_enrich_adj < 0.05 ~ "enriched vs rest",
+      TRUE ~ "not significant"
+    )
+  ) %>%
+  ungroup() %>%
+  select(-fisher) %>%
+  arrange(cohort, median)
+
+tttggg_plot_data <- tttggg_data %>%
+  left_join(
+    tttggg_summary %>%
+      select(cohort, cancer_type, n, median, depletion_signal),
+    by = c("cohort", "cancer_type")
+  ) %>%
+  mutate(
+    cancer_type_ordered = fct_reorder(
+      paste0(cohort, "___", cancer_type, "\n", "n=", n),
+      median,
+      .fun = first
+    )
+  )
+```
+
+`TTTGGG_singleton_dist` is a log2 tumor/control ratio normalized by telomere content. The analysis keeps cancer types with at least `r tttggg_min_n` samples in the corresponding cohort and defines depletion as `TTTGGG_singleton_dist <` `r tttggg_depletion_threshold`. The plot shows the full continuous values, ordered within each cohort by the cancer-type median.
+
+For each cancer type, Fisher's exact test asks whether the fraction of samples below the selected threshold is enriched compared with all other cancer types in the same cohort. Benjamini-Hochberg correction is applied separately within each cohort.
+
+```{r tttggg-cancer-type-rank-plot, fig.width = 18, fig.height = 10}
+ggplot(tttggg_plot_data, aes(cancer_type_ordered, TTTGGG_singleton_dist)) +
+  geom_hline(
+    yintercept = tttggg_depletion_threshold,
+    linetype = "dashed",
+    color = "firebrick"
+  ) +
+  geom_point(
+    aes(color = depleted_TTTGGG),
+    position = position_jitter(width = 0.22, height = 0),
+    alpha = 0.35,
+    size = 0.75,
+    show.legend = FALSE
+  ) +
+  stat_summary(
+    fun = median,
+    geom = "crossbar",
+    width = 0.55,
+    fatten = 0,
+    color = "black"
+  ) +
+  facet_wrap(~ cohort, scales = "free_x", ncol = 1) +
+  scale_color_manual(values = c("FALSE" = "grey65", "TRUE" = "firebrick")) +
+  scale_x_discrete(labels = \(x) str_remove(x, "^.*___")) +
+  labs(
+    x = NULL,
+    y = "TTTGGG singleton_dist log2(tumor/control)",
+    title = "TTTGGG depletion by cancer type",
+    subtitle = paste0(
+      "Cancer types with n >= ", tttggg_min_n,
+      "; dashed line marks depletion threshold = ", tttggg_depletion_threshold
+    )
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 55, hjust = 1, size = 8),
+    strip.text = element_text(face = "bold")
+  )
+```
+
+```{r tttggg-depleted-rate-plot, fig.width = 15, fig.height = 9}
+ggplot(
+  tttggg_summary,
+  aes(
+    x = depleted_rate,
+    y = fct_reorder(paste0(cancer_type, " (n=", n, ")"), depleted_rate)
+  )
+) +
+  geom_vline(
+    aes(xintercept = cohort_depleted_rate),
+    linetype = "dashed",
+    color = "grey35"
+  ) +
+  geom_col(aes(fill = depletion_signal), width = 0.72) +
+  facet_wrap(~ cohort, scales = "free_y", ncol = 2) +
+  scale_x_continuous(labels = scales::percent_format(accuracy = 1)) +
+  scale_fill_manual(
+    values = c(
+      "enriched vs rest" = "firebrick",
+      "not significant" = "grey75"
+    )
+  ) +
+  labs(
+    x = paste0("Fraction with TTTGGG singleton_dist < ", tttggg_depletion_threshold),
+    y = NULL,
+    fill = "Signal",
+    title = "Cancer-type enrichment for TTTGGG depletion",
+    subtitle = paste0(
+      "Cancer types with n >= ", tttggg_min_n,
+      "; dashed line is the cohort-wide depletion fraction"
+    )
+  ) +
+  theme_bw() +
+  theme(legend.position = "bottom")
+```
+
+```{r tttggg-depletion-table}
+tttggg_summary %>%
+  select(
+    cohort, cancer_type, n, median, q25, q75,
+    depleted_n, depleted_rate, cohort_depleted_rate,
+    odds_ratio, p_enrich, p_enrich_adj, depletion_signal
+  ) %>%
+  mutate(
+    across(c(median, q25, q75), \(x) round(x, 3)),
+    across(c(depleted_rate, cohort_depleted_rate), \(x) scales::percent(x, accuracy = 0.1)),
+    odds_ratio = round(odds_ratio, 2),
+    p_enrich = signif(p_enrich, 3),
+    p_enrich_adj = signif(p_enrich_adj, 3)
+  ) %>%
+  kable(caption = "TTTGGG depletion by cancer type in primary and metastatic cohorts")
 ```
