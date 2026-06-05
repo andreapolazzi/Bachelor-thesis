@@ -1,17 +1,19 @@
 #!/bin/bash
-#PBS -N shap_tests
 #
-# Two SMALL, fully-traceable SHAP test runs in one job.
+# Two SMALL, fully-traceable SHAP test runs, for the STANDALONE 'carmela' box
+# (no PBS/Slurm scheduler; has an RTX 3080 GPU; /ngs is mounted so the conda
+# env and input files are already present).
 #   STEP 1: imputation (probability space, self-verified)  -> output_imp_test/
 #   STEP 2: recontextualization (logit space, diagnostic)  -> output_recon_test/
 #
-# Logging is done INSIDE the script to a timestamped file, NOT via #PBS -o/-e.
-# Reason: ${PBS_JOBID} does not expand in #PBS directive lines, so those logs
-# get lost. Here every line of stdout+stderr is tee'd to:
+# Every line of stdout+stderr is tee'd to a timestamped log:
 #     /ngs/iflores/andrea/logs/shap_tests_<timestamp>.log
 # so a crash is always traceable.
 #
-# Submit with GPU:  qsubmit.pl -g 1 -n 16 -s /ngs/iflores/andrea/run_shap_tests.sh
+# Run it directly (NOT via a scheduler). To survive SSH disconnects use tmux:
+#     tmux new -s shap
+#     bash /ngs/iflores/andrea/run_shap_tests.sh
+#     # Ctrl-b then d  to detach;  tmux attach -t shap  to come back
 
 set -u
 
@@ -30,8 +32,11 @@ echo "# log file: $LOG"
 echo "######################################################################"
 
 # --- environment ---
-source /ngs/software/micromamba/env.sh
-micromamba activate /ngs/software/conda/envs/tabpfn2
+# carmela has conda available as a shell function and the tabpfn2 env on /ngs.
+source /ngs/software/conda/etc/profile.d/conda.sh 2>/dev/null || true
+conda activate /ngs/software/conda/envs/tabpfn2 \
+  || micromamba activate /ngs/software/conda/envs/tabpfn2 \
+  || { echo "ERROR: could not activate tabpfn2 env"; exit 1; }
 cd "$BASE"
 
 echo "host        : $(hostname)"
@@ -64,7 +69,7 @@ run_step "imputation-test" \
   --output-dir  "$BASE/output_imp_test" \
   --budget      128 \
   --n-explain   10 \
-  --n-jobs      16 \
+  --n-jobs      4  \
   --class-index 1 \
   --seed        42
 IMP_RC=$?
@@ -76,7 +81,7 @@ run_step "recontext-test" \
   --output-dir  "$BASE/output_recon_test" \
   --budget      128 \
   --n-explain   10 \
-  --n-jobs      16 \
+  --n-jobs      4  \
   --class-index 1 \
   --seed        42
 RECON_RC=$?

@@ -65,6 +65,11 @@ def parse_args():
                    default="imputation",
                    help="Explainer paradigm. Default: imputation (probability space, "
                         "self-verified).")
+    p.add_argument("--folds", default=None,
+                   help="Path to folds.csv (single column of 1..K fold ids, row-aligned "
+                        "to X_full.csv). When given, runs OOF mode and reads X_full.csv + "
+                        "y_full.csv (and meta.csv if present) from --input-dir instead of "
+                        "the X_train/X_test/y_train single-split files.")
     p.add_argument("--budget", type=int, default=256,
                    help="Shapley budget: model evaluations per sample. "
                         "Higher = more accurate but slower. Default: 256")
@@ -98,11 +103,140 @@ def load_data(input_dir):
     return X_train_df, X_test_df, y_train
 
 
+def build_explainer(explainer_kind, clf, X_bg, y_bg, proba_col, class_index, budget):
+    """Return (explainer, space) for the chosen paradigm, with X_bg as background."""
+    if explainer_kind == "imputation":
+        def proba_predict(Z):
+            return clf.predict_proba(Z)[:, proba_col]
+        explainer = shapiq.TabularExplainer(
+            model=proba_predict, data=X_bg, index="SV", max_order=1, imputer="marginal",
+        )
+        return explainer, "probability"
+    explainer = get_tabpfn_explainer(
+        model=clf, data=X_bg, labels=y_bg, index="SV", max_order=1,
+        class_index=class_index,
+    )
+    return explainer, "logit"
+
+
+def extract_shap(iv_list, n_features):
+    """Return (shap_matrix [n x n_features], baselines [n]) from a shapiq iv list."""
+    shap_matrix = np.array(
+        [[float(iv[(j,)]) for j in range(n_features)] for iv in iv_list]
+    )
+    baselines = np.array([float(iv.baseline_value) for iv in iv_list])
+    return shap_matrix, baselines
+
+
+def run_oof(args, input_dir, output_dir):
+    """Out-of-fold SHAP: train per fold, explain held-out fold, assemble in order."""
+    X_df = pd.read_csv(input_dir / "X_full.csv")
+    y = pd.read_csv(input_dir / "y_full.csv").iloc[:, 0].to_numpy().astype(int)
+    folds = pd.read_csv(args.folds).iloc[:, 0].to_numpy().astype(int)
+    feature_names = list(X_df.columns)
+    n_features = len(feature_names)
+    X = X_df.to_numpy().astype(float)
+    N = X.shape[0]
+    if not (len(y) == N and len(folds) == N):
+        print(f"ERROR: row mismatch X={N} y={len(y)} folds={len(folds)}", file=sys.stderr)
+        sys.exit(1)
+
+    class_index = args.class_index
+    meta_path = input_dir / "meta.csv"
+    meta_df = pd.read_csv(meta_path) if meta_path.exists() else None
+
+    shap_all = np.full((N, n_features), np.nan)
+    base_all = np.full(N, np.nan)
+    pred_all = np.full(N, np.nan)
+    space = None
+
+    print(f"OOF mode: N={N}, features={n_features}, folds={sorted(np.unique(folds))}")
+    print(f"Explainer: {args.explainer}  budget={args.budget}  class_index={class_index}")
+
+    for i in sorted(np.unique(folds)):
+        tr = folds != i
+        te = folds == i
+        print(f"\n--- fold {i}: train={tr.sum()} explain={te.sum()} ---", flush=True)
+        clf = TabPFNClassifier()
+        clf.fit(X[tr], y[tr])
+        classes = list(clf.classes_)
+        if class_index not in classes:
+            print(f"ERROR fold {i}: class {class_index} not in {classes}", file=sys.stderr)
+            sys.exit(1)
+        proba_col = classes.index(class_index)
+
+        def proba_predict(Z, _clf=clf, _c=proba_col):
+            return _clf.predict_proba(Z)[:, _c]
+
+        if args.explainer == "imputation":
+            expected = float(proba_predict(X[tr]).mean())
+
+        explainer, space = build_explainer(
+            args.explainer, clf, X[tr], y[tr], proba_col, class_index, args.budget
+        )
+        iv_list = explainer.explain_X(
+            X[te], budget=args.budget, n_jobs=args.n_jobs,
+            random_state=args.seed, verbose=True,
+        )
+        shap_fold, base_fold = extract_shap(iv_list, n_features)
+        pred_fold = proba_predict(X[te])
+
+        if args.explainer == "imputation":
+            bdiff = abs(float(base_fold.mean()) - expected)
+            print(f"  fold {i} baseline {base_fold.mean():.4f} vs expected {expected:.4f} "
+                  f"(|diff|={bdiff:.4f})")
+            if bdiff > BASELINE_TOL:
+                print(f"ERROR fold {i}: baseline mismatch -> wrong class. Aborting.",
+                      file=sys.stderr)
+                sys.exit(2)
+
+        idx = np.where(te)[0]
+        shap_all[idx] = shap_fold
+        base_all[idx] = base_fold
+        pred_all[idx] = pred_fold
+
+    if np.isnan(shap_all).any():
+        print("ERROR: some rows were never explained (NaN remains).", file=sys.stderr)
+        sys.exit(1)
+
+    recon = base_all + shap_all.sum(axis=1)
+    print(f"\nVerification ({space} space):")
+    if args.explainer == "imputation":
+        add_err = np.abs(recon - pred_all)
+        print(f"  additivity error (mean/max): {add_err.mean():.4g} / {add_err.max():.4g}")
+    else:
+        ar = np.argsort(np.argsort(pred_all))
+        rr = np.argsort(np.argsort(recon))
+        rho = float(np.corrcoef(ar, rr)[0, 1])
+        print(f"  rank corr(reconstruction, OOF P(class={class_index})): {rho:.4f}")
+        if rho < 0:
+            print("  WARNING: negative rank correlation -- possible wrong class/sign.")
+
+    baseline_scalar = float(np.nanmean(base_all))
+    pd.DataFrame(shap_all, columns=feature_names).to_csv(
+        output_dir / "shap_values.csv", index=False)
+    X_df.to_csv(output_dir / "X_test_explained.csv", index=False)
+    (output_dir / "shap_baseline.txt").write_text(str(baseline_scalar))
+    pd.DataFrame({"baseline": base_all}).to_csv(output_dir / "baselines.csv", index=False)
+    pd.DataFrame({"oof_pred": pred_all}).to_csv(output_dir / "oof_pred.csv", index=False)
+    pd.DataFrame({"fold": folds}).to_csv(output_dir / "fold_id.csv", index=False)
+    (output_dir / "feature_names.txt").write_text("\n".join(feature_names))
+    (output_dir / "shap_space.txt").write_text(space)
+    if meta_df is not None:
+        meta_df.to_csv(output_dir / "meta.csv", index=False)
+
+    print(f"\nSaved OOF outputs to {output_dir}/  ({space} space, baseline={baseline_scalar:.4f})")
+
+
 def main():
     args = parse_args()
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    if args.folds is not None:
+        run_oof(args, input_dir, output_dir)
+        return
 
     X_train_df, X_test_df, y_train = load_data(input_dir)
     feature_names = list(X_train_df.columns)
@@ -212,15 +346,32 @@ def main():
                   f"{ADDITIVITY_WARN}. Consider increasing --budget.")
         print("  Class check PASSED.")
     else:
-        # Diagnostics to identify which class/space the output represents.
-        p_target = float(proba_predict(X_train).mean())
-        p_other = 1.0 - p_target
-        eps = 1e-9
-        logit_target = float(np.log((p_target + eps) / (p_other + eps)))
-        print(f"  mean predict_proba target class : {p_target:.4f}")
-        print(f"  logit(mean prob target class)   : {logit_target:.4f}")
-        print(f"  logit(mean prob OTHER class)    : {-logit_target:.4f}")
-        print("  (Compare baseline above to these to confirm the explained class/sign.)")
+        # Recontextualization output is in TabPFN's native (logit-like) space, NOT
+        # probability, and the baseline is the empty-coalition (all-features-removed)
+        # reference -- it is NOT logit(mean prob), so do not compare it to prevalence.
+        # The correct correctness checks are:
+        #   (a) additivity: baseline + sum(SHAP_row) reconstructs the row's model output;
+        #   (b) class/sign: that reconstruction must INCREASE with the true class
+        #       probability (high-risk rows -> higher reconstruction).
+        actual_p = proba_predict(X_test)             # true P(class) per row, for ranking
+        recon = baselines + shap_matrix.sum(axis=1)  # recontextualized model output
+        # Spearman (rank) correlation without scipy:
+        ar = np.argsort(np.argsort(actual_p))
+        rr = np.argsort(np.argsort(recon))
+        if len(recon) > 1 and np.std(ar) > 0 and np.std(rr) > 0:
+            spearman = float(np.corrcoef(ar, rr)[0, 1])
+        else:
+            spearman = float("nan")
+        print("  output space                    : recontextualized logit-like "
+              "(NOT probability)")
+        print(f"  baseline (empty-coalition ref)  : {baseline:.4f}")
+        print(f"  rank corr(reconstruction, P(class={class_index})) : {spearman:.4f}")
+        print("    -> close to +1 means the explanation correctly tracks the target "
+              "class (high-risk rows reconstruct higher). Negative would mean a "
+              "sign/class flip.")
+        if not np.isnan(spearman) and spearman < 0:
+            print("  WARNING: negative rank correlation -- explanation may be for the "
+                  "WRONG class/sign. Inspect before using.")
 
     # --- Save outputs ---
     pd.DataFrame(shap_matrix, columns=feature_names).to_csv(
