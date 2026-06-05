@@ -1,5 +1,5 @@
 ---
-title: "12_metastatic_dataset"
+title: "4_metastatic_dataset"
 author: 'Andrea Polazzi'
 date: '`r Sys.Date()`'
 output: html_document
@@ -12,8 +12,10 @@ library(tidyverse, quietly = T)
 library(readxl)
 library(here)
 source(here('scripts', 'clean_columns.R'))
+source(here('scripts', 'useful_plots.R'))
 knitr::opts_chunk$set(echo = FALSE, warning = FALSE, message = FALSE)
 data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
+metastatic_mesenchymal <- read_xlsx(here('data', 'processed', 'metastatic_red_edit_mesenchymal.xlsx'))
 clean_data <- clean_drivers_data(data)
 
 clean_data <- clean_data %>% 
@@ -30,103 +32,62 @@ summary(clean_data)
 
 **Importantly** we don't have info on TERT expression in this dataset. Moreover, TVR motifs are expressed in counts normalized by total reads.
 
-# PCA biplots
+# PCA using metastatic mesenchymal groups
 
-```{r pca-biplot, echo=FALSE}
-X <- scale(clean_data)
-pca <- prcomp(X, center = TRUE, scale. = TRUE)
-var_explained <- summary(pca)$importance[2,]
+Here we repeat the PCA/biplot workflow used in `02_ALT_status_full.Rmd`, but using the processed metastatic dataset with mesenchymal grouping. The PCA is run on one row per patient, with samples coloured by `tumor_origin`.
 
-scores <- data.frame(
-    PC1 = pca$x[,1],
-    PC2 = pca$x[,2]
-  )
+```{r metastatic-mesenchymal-pca-data}
+metastatic_features <- c(
+  "tumor_tf_rate",
+  "blood_tf_rate",
+  "intrachrom_reads_total_reads",
+  grep("_singleton_dist$", names(metastatic_mesenchymal), value = TRUE)
+)
 
-loadings <- data.frame(
-    PC1 = pca$rotation[,1],
-    PC2 = pca$rotation[,2],
-    comp_names = rownames(pca$rotation)
-  )
+metastatic_pca_data <- metastatic_mesenchymal %>%
+  distinct(patient_id, .keep_all = TRUE) %>%
+  mutate(tumor_origin = factor(tumor_origin)) %>%
+  select(tumor_origin, all_of(metastatic_features)) %>%
+  drop_na()
 
-loadings$PC1 <- loadings$PC1 * 80
-loadings$PC2 <- loadings$PC2 * 80
-
-library(ggrepel)
-
-scores %>% 
-  ggplot(aes(PC1, PC2))+
-  geom_point(alpha=0.4, size=2, color = 'purple')+
-  geom_segment(data = loadings,
-               aes(x = 0, y = 0, xend = PC1, yend = PC2),
-               arrow = arrow(length = unit(0.25,"cm")),
-               inherit.aes = FALSE,
-               color = 'black')+
-  geom_text_repel(data = loadings,
-                  aes(x = PC1, y = PC2, label = comp_names),
-                  inherit.aes = FALSE,
-                  size = 3.5) +
-  theme_bw() +
-  coord_equal() +
-  labs(title = 'PCA biplot on Hartwig dataset',
-       x = paste0('PC1 (', round(var_explained[1]*100, 1), '%)'),
-       y = paste0('PC2 (', round(var_explained[2]*100, 1), '%)')
-  )
-  
+summary(metastatic_pca_data)
 ```
 
-The PCA shows that the **main axis of variance is PC1**, strongly driven by `tel_content`, `tel_insertion`, and several TVR motifs (`GTAGGG`, `ATAGGG`, `TTGGGG`, ...). This can be interpreted as a **telomere abundance/instability axis**.
+## PCA
 
-PC2 explains less variance (9.1%), but is dominated by motifs such as `TCAGGG` and `TTCGGG`, and slightly opposed by `TTTGGG`, `TGAGGG` and `TAAGGG`. This can be interpreted as a **composition axis of TVR motifs**.
+```{r pca-metastatic-mesenchymal}
+res_met <- pca_plot(
+  metastatic_pca_data,
+  coloring = metastatic_pca_data$tumor_origin,
+  title = paste0("PCA - metastatic tumor origin (n = ", nrow(metastatic_pca_data), ")")
+)
 
-The **dense cluster** at the origin suggests that **most tumors have a similar telomere signal**, whereas a small subset has distinct telomere activity (outliers).
-
-**TF rate shows little contribution to variance**: it either has low variability, or is overshadowed by other collinear features (possibly tel_content/tel_insertion). For this reason, the next step in the analysis could be to repeat the PCA excluding for strong contributors such as tel_insertion and tel_content, in order to isolate TVR structure and see if motifs cluster more cleanly.
-
-```{r pca-biplot-reduced, echo=FALSE}
-reduced_data <- clean_data %>% 
-  select(-tel_content, -tel_insertion,)
-
-X2 <- scale(reduced_data)
-pca2 <- prcomp(X2, center = TRUE, scale. = TRUE)
-var_explained2 <- summary(pca2)$importance[2,]
-
-scores2 <- data.frame(
-    PC1 = pca2$x[,1],
-    PC2 = pca2$x[,2]
-  )
-
-loadings2 <- data.frame(
-    PC1 = pca2$rotation[,1],
-    PC2 = pca2$rotation[,2],
-    comp_names = rownames(pca2$rotation)
-  )
-
-loadings2$PC1 <- loadings2$PC1 * 80
-loadings2$PC2 <- loadings2$PC2 * 80
-
-library(ggrepel)
-
-scores2 %>% 
-  ggplot(aes(PC1, PC2))+
-  geom_point(alpha=0.4, size=2, color = 'purple')+
-  geom_segment(data = loadings2,
-               aes(x = 0, y = 0, xend = PC1, yend = PC2),
-               arrow = arrow(length = unit(0.25,"cm")),
-               inherit.aes = FALSE,
-               color = 'black')+
-  geom_text_repel(data = loadings2,
-                  aes(x = PC1, y = PC2, label = comp_names),
-                  inherit.aes = FALSE,
-                  size = 3.5) +
-  theme_bw() +
-  coord_equal() +
-  labs(title = 'PCA biplot on Hartwig dataset - reduced',
-       x = paste0('PC1 (', round(var_explained2[1]*100, 1), '%)'),
-       y = paste0('PC2 (', round(var_explained2[2]*100, 1), '%)')
-  )
+res_met$plot
+summary(res_met$pca)
+res_met$pca$rotation
+ggsave(here('outputs', 'PCA_metastatic_tumor_origin.pdf'), res_met$plot, width = 7, height = 6)
 ```
 
-The **structure** and **features contribution** are **very similar to the last plot**, with TF rate showing very low variance explained and motifs explaining most of the vertical spread.
+## Biplot
+
+```{r biplot-metastatic-mesenchymal}
+comp_met <- ifelse(
+  grepl("singleton_dist", metastatic_features),
+  sub("_singleton_dist", "", metastatic_features),
+  metastatic_features
+)
+
+bip_met <- pca_biplot(
+  metastatic_pca_data,
+  coloring = metastatic_pca_data$tumor_origin,
+  scale_arrows = 10,
+  compnames = comp_met,
+  title = "PCA biplot - metastatic tumor origin"
+)
+
+bip_met$plot
+ggsave(here('outputs', 'PCA_biplot_metastatic_tumor_origin.pdf'), bip_met$plot, width = 7, height = 6)
+```
 
 # Include also TERT mutation and cancer type info 
 
@@ -403,4 +364,3 @@ ggplot(scores_umap, aes(UMAP1, UMAP2)) +
     x = "UMAP1", y = "UMAP2"
   )
 ```
-
