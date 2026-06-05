@@ -33,19 +33,22 @@ source(here('scripts', 'clean_columns.R'))
 cache_file <- here('outputs', 'tabpfn_cv_results.rds')
 run_tabpfn <- !file.exists(cache_file)
 
-data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
+data <- read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 
-clean_data <- clean_pcawg_data(data)
+features14 <- c(
+  "tf_primary_rate", "tf_blood_rate", "telomere_insertion_rate",
+  "telomere_content_log2", "TERT_FPKM",
+  "ATAGGG_singleton_dist", "CTAGGG_singleton_dist", "GTAGGG_singleton_dist",
+  "TAAGGG_singleton_dist", "TCAGGG_singleton_dist", "TGAGGG_singleton_dist",
+  "TTCGGG_singleton_dist", "TTGGGG_singleton_dist", "TTTGGG_singleton_dist"
+)
 
-model_data <- clean_data %>%
-  select(-c(1, 2)) %>%
-  filter(complete.cases(.)) %>%
-  mutate(
-    alt_status = factor(
-      alt_status,
-      levels = c("ALT-low", "ALT-high")
-    )
-  )
+model_full <- data %>%
+  select(all_of(features14), alt_status, donor_id, cancer_type, cancer_group) %>%
+  filter(complete.cases(across(all_of(features14)))) %>%
+  mutate(alt_status = factor(alt_status, levels = c("ALT-low", "ALT-high")))
+
+model_data <- model_full %>% select(all_of(features14), alt_status)
 
 summary(model_data)
 ```
@@ -58,7 +61,6 @@ train_index <- sample(seq_len(nrow(model_data)), size = 0.7 * nrow(model_data))
 train <- model_data[train_index, ]
 test  <- model_data[-train_index, ]
 
-# convert in 0/1 encoding, to be sure
 y_train_r <- as.integer(train$alt_status == "ALT-high")
 y_test_r  <- as.integer(test$alt_status  == "ALT-high")
 
@@ -70,6 +72,35 @@ y_all_r  <- as.integer(model_data$alt_status == "ALT-high")
 ```
 
 Here we have split the data in training (70%) and test (30%), encoding `alt_status` as 0 (ALT-low) and 1 (ALT-high).
+
+# Export for out-of-fold SHAP (5-fold CV)
+
+```{r export-shap-cv}
+library(caret)
+
+# one stratified 5-fold split on alt_status (mirrors notebook 02)
+set.seed(42)
+fold_list <- createFolds(model_data$alt_status, k = 5)
+folds_vec <- integer(nrow(model_data))
+for (i in seq_along(fold_list)) folds_vec[fold_list[[i]]] <- i
+
+shap_cv_dir <- here('outputs', 'shap_input_cv')
+dir.create(shap_cv_dir, recursive = TRUE, showWarnings = FALSE)
+
+readr::write_csv(model_data %>% select(all_of(features14)),
+                 file.path(shap_cv_dir, 'X_full.csv'))
+readr::write_csv(data.frame(y = as.integer(model_data$alt_status == "ALT-high")),
+                 file.path(shap_cv_dir, 'y_full.csv'))
+readr::write_csv(data.frame(fold = folds_vec),
+                 file.path(shap_cv_dir, 'folds.csv'))
+readr::write_csv(model_full %>%
+                   transmute(donor_id, cancer_type, cancer_group, alt_status),
+                 file.path(shap_cv_dir, 'meta.csv'))
+
+cat(sprintf("Exported %d samples x %d features to %s\n",
+            nrow(model_data), length(features14), shap_cv_dir))
+table(folds_vec, model_data$alt_status)
+```
 
 # Training
 
@@ -323,16 +354,19 @@ if (length(existing_files) == 0) {
 ```
 
 ```{r tabpfn-shap-hpc-test}
-library(shapviz)
-sv <- shapviz(
-  object = as.matrix(read.csv(here('outputs', 'output_test', 'shap_values.csv'))),
-  X = read.csv(here('outputs', 'output_test', 'X_test_explained.csv')),
-  baseline = as.numeric(readLines(here('outputs', 'output_test', 'shap_baseline.txt')))
-)
+source(here('scripts', 'reconstruct_shapviz.R'))
 
-sv_importance(sv, kind = 'both')
-sv_waterfall(sv, row_id=1)
-sv_dependence(sv, v = 'telomere_insertion_rate', color_var = 'telomere_content_log2')
+sv_importance(sv_imp, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
+sv_dependence(sv_imp, v = 'telomere_insertion_rate', color_var = 'tf_rate')
+sv_dependence(sv_imp, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
+sv_dependence(sv_imp, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
+sv_dependence(sv_imp, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
+
+sv_importance(sv_rec, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
+sv_dependence(sv_rec, v = 'telomere_insertion_rate', color_var = 'tf_rate')
+sv_dependence(sv_rec, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
+sv_dependence(sv_rec, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
+sv_dependence(sv_rec, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
 ```
 
 ------------------------------------------------------------------------
