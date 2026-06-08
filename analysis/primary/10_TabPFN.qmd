@@ -356,17 +356,49 @@ if (length(existing_files) == 0) {
 ```{r tabpfn-shap-hpc-test}
 source(here('scripts', 'reconstruct_shapviz.R'))
 
+# per-feature rank, scaled to [0,1], NA-safe
+rank01 <- function(x) {
+  n <- sum(!is.na(x))
+  (rank(x, na.last = "keep", ties.method = "average") - 1) / (n - 1)
+}
+
+recolor_by_rank <- function(sv) {
+  X_rank <- as.data.frame(lapply(get_feature_values(sv), rank01))
+  shapviz(object   = get_shap_values(sv),
+          X        = X_rank,
+          baseline = get_baseline(sv))
+}
+
+sv_imp2_rank <- recolor_by_rank(sv_imp2)
+sv_rec2_rank <- recolor_by_rank(sv_rec2)
+
+# Imputation, single split train/test
 sv_importance(sv_imp, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
 sv_dependence(sv_imp, v = 'telomere_insertion_rate', color_var = 'tf_rate')
 sv_dependence(sv_imp, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
 sv_dependence(sv_imp, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
 sv_dependence(sv_imp, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
 
+# Imputation, 5-fold CV
+sv_importance(sv_imp2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
+sv_dependence(sv_imp2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate')
+sv_dependence(sv_imp2_rank, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
+sv_dependence(sv_imp2_rank, v = "tf_primary_rate",         color_var = "telomere_content_log2") + theme_bw()
+sv_dependence(sv_imp2_rank, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
+
+# Recontextualization, single split train/test
 sv_importance(sv_rec, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
 sv_dependence(sv_rec, v = 'telomere_insertion_rate', color_var = 'tf_rate')
 sv_dependence(sv_rec, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
 sv_dependence(sv_rec, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
 sv_dependence(sv_rec, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
+
+# Imputation, 5-fold CV
+sv_importance(sv_rec2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
+sv_dependence(sv_rec2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate')
+sv_dependence(sv_rec2_rank, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
+sv_dependence(sv_rec2_rank, v = "tf_primary_rate",         color_var = "telomere_content_log2") + theme_bw()
+sv_dependence(sv_rec2_rank, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
 ```
 
 ------------------------------------------------------------------------
