@@ -348,7 +348,123 @@ ggplot(sing_long, aes(x = alt_status, y = value, fill = cancer_group)) +
   theme_bw() + theme(legend.position = "top", strip.text = element_text(face = "bold"))
 ```
 
-# 5. Correlation structure differences
+# 5. TERT expression — TERT-available subset
+
+TERT expression (FPKM) is available for only a subset of samples: after
+applying the same filters as the main analysis (`tf_primary_rate < 10`,
+`drop_na` on every column including `TERT_FPKM`), **n = 816** samples
+remain (vs n = 1942 in sections 1–4). All tests and plots in this
+section therefore use this restricted subset. Everything else — test
+choice, effect-size metric, BH correction within each stratum — is
+identical to the rest of the notebook.
+
+```{r tert-subset}
+# Build TERT subset: identical pipeline to setup/build-frame but with
+# TERT_FPKM retained, so only rows where TERT is non-NA survive drop_na().
+df_tert <- data %>%
+  drop_na() %>%
+  filter(tf_primary_rate < 10) %>%
+  mutate(
+    tf_primary_rate         = log1p(tf_primary_rate),
+    tf_blood_rate           = log1p(tf_blood_rate),
+    telomere_insertion_rate = log1p(telomere_insertion_rate),
+    TERT_FPKM               = log1p(TERT_FPKM),
+    alt_status   = factor(alt_status, levels = c("ALT-low", "ALT-high")),
+    cancer_group = factor(cancer_group, levels = c(grp_non, grp_mes))
+  ) %>%
+  select(-donor_id, -cancer_type, -Specimen.Type.Summary)
+
+cat(sprintf(
+  "TERT subset: n = %d  (%s: %d, %s: %d)\n",
+  nrow(df_tert),
+  grp_mes, sum(df_tert$cancer_group == grp_mes),
+  grp_non, sum(df_tert$cancer_group == grp_non)
+))
+```
+
+```{r tert-tests}
+tert_tests <- bind_rows(
+  one_test(df_tert,                                    "TERT_FPKM", "overall"),
+  one_test(filter(df_tert, alt_status == "ALT-low"),   "TERT_FPKM", "ALT-low"),
+  one_test(filter(df_tert, alt_status == "ALT-high"),  "TERT_FPKM", "ALT-high")
+) %>%
+  mutate(
+    p.adj   = p.adjust(p, method = "BH"),
+    stratum = factor(stratum, levels = strata_levels),
+    signif  = cut(p.adj, breaks = c(-Inf, 0.001, 0.01, 0.05, Inf),
+                  labels = c("***", "**", "*", "ns"))
+  )
+```
+
+## Table
+
+```{r tert-table}
+tert_tests %>%
+  transmute(
+    stratum,
+    n_mes, n_non,
+    median_mes  = round(median_mes,  3),
+    median_non  = round(median_non,  3),
+    cliff_delta = round(cliff_delta, 3),
+    p     = signif(p, 3),
+    p.adj = signif(p.adj, 3),
+    signif
+  ) %>%
+  kable(caption = "TERT_FPKM (log1p): Mesenchymal vs Non-Mesenchymal — Wilcoxon + Cliff's delta")
+```
+
+## Plots
+
+```{r tert-overall-plot}
+ann_o_tert <- tert_tests %>% filter(stratum == "overall")
+
+ggplot(df_tert, aes(x = cancer_group, y = TERT_FPKM, fill = cancer_group)) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.15, size = 0.9) +
+  geom_text(
+    data = ann_o_tert,
+    aes(x = 1.5, y = Inf, label = signif),
+    inherit.aes = FALSE, vjust = 1.5, size = 4.5
+  ) +
+  scale_fill_manual(values = grp_colors) +
+  labs(
+    title   = "TERT expression (log1p FPKM) by cancer group",
+    subtitle = sprintf("TERT subset: n = %d  (%s n=%d, %s n=%d)",
+                       nrow(df_tert),
+                       grp_mes, sum(df_tert$cancer_group == grp_mes),
+                       grp_non, sum(df_tert$cancer_group == grp_non)),
+    x = NULL, y = "TERT_FPKM (log1p)"
+  ) +
+  theme_bw() + theme(legend.position = "none")
+```
+
+```{r tert-alt-plot}
+ann_a_tert <- tert_tests %>%
+  filter(stratum %in% c("ALT-low", "ALT-high")) %>%
+  mutate(alt_status = factor(as.character(stratum), levels = levels(df_tert$alt_status)))
+
+ggplot(df_tert, aes(x = cancer_group, y = TERT_FPKM, fill = cancer_group)) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.15, size = 0.8) +
+  geom_text(
+    data = ann_a_tert,
+    aes(x = 1.5, y = Inf, label = signif),
+    inherit.aes = FALSE, vjust = 1.5, size = 4.5
+  ) +
+  facet_wrap(~ alt_status) +
+  scale_fill_manual(values = grp_colors) +
+  labs(
+    title    = "TERT expression by group, stratified by ALT status",
+    subtitle = sprintf("TERT subset only (n = %d). Star = BH-adjusted Wilcoxon within stratum.", nrow(df_tert)),
+    x = NULL, y = "TERT_FPKM (log1p)"
+  ) +
+  theme_bw() +
+  theme(legend.position = "none", strip.text = element_text(face = "bold"))
+```
+
+# 6. Correlation structure differences
 
 ```{r correlation}
 cor_mes <- df_group %>% filter(cancer_group == grp_mes) %>%
