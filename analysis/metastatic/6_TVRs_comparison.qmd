@@ -21,6 +21,7 @@ library(ggpubr)
 library(rstatix)
 
 met_intrachrom <- read_xlsx(here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
+met_mesenchymal <- read_xlsx(here('data', 'processed', 'metastatic_red_edit_mesenchymal.xlsx'))
 primary <- read_xlsx(here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
 ```
 
@@ -310,6 +311,92 @@ ggplot(motif_long, aes(primary_tumor_group, singleton_dist, fill = primary_tumor
     y = "Singleton distance",
     fill = "Primary tumor group",
     title = "TVR singleton distance distributions by primary tumor group"
+  ) +
+  theme_bw() +
+  theme(
+    axis.text.x = element_text(angle = 35, hjust = 1),
+    strip.text = element_text(face = "bold"),
+    legend.position = "bottom"
+  )
+```
+
+# TVR singleton distance by mesenchymal vs non-mesenchymal origin (metastatic)
+
+```{r tvr-mes-metastatic, fig.width = 14, fig.height = 11}
+data_mes_met <- met_mesenchymal %>%
+  distinct(patient_id, .keep_all = TRUE) %>%
+  filter(tumor_origin %in% c("Mesenchymal", "Non_mesenchymal")) %>%
+  mutate(tumor_origin = factor(tumor_origin,
+                               levels = c("Non_mesenchymal", "Mesenchymal"))) %>%
+  select(patient_id, ends_with("_singleton_dist"), tumor_origin, tumor_tf_rate, blood_tf_rate) %>%
+  filter(if_any(ends_with("_singleton_dist"), ~ !is.na(.)))
+
+motif_long_mes_met <- data_mes_met %>%
+  pivot_longer(
+    cols = ends_with("_singleton_dist"),
+    names_to = "motif",
+    values_to = "singleton_dist"
+  ) %>%
+  mutate(motif = str_remove(motif, "_singleton_dist"))
+
+group_labels_mes_met <- data_mes_met %>%
+  count(tumor_origin) %>%
+  mutate(label = paste0(tumor_origin, " (n=", n, ")")) %>%
+  { setNames(.$label, .$tumor_origin) }
+
+kw_tests_mes_met <- motif_long_mes_met %>%
+  group_by(motif) %>%
+  kruskal_test(singleton_dist ~ tumor_origin) %>%
+  adjust_pvalue(method = "BH") %>%
+  mutate(label = paste0("KW p=", signif(p.adj, 2)))
+
+kw_sig_motifs_mes_met <- kw_tests_mes_met %>%
+  filter(p.adj < 0.05) %>%
+  pull(motif)
+
+dunn_sig_mes_met <- motif_long_mes_met %>%
+  filter(motif %in% kw_sig_motifs_mes_met) %>%
+  group_by(motif) %>%
+  dunn_test(singleton_dist ~ tumor_origin, p.adjust.method = "BH") %>%
+  filter(p.adj.signif != "ns") %>%
+  add_xy_position(x = "tumor_origin", scales = "free", step.increase = 0.12)
+
+mes_colors      <- c("Non_mesenchymal" = "grey60", "Mesenchymal" = "firebrick")
+mes_colors_dark <- c("Non_mesenchymal" = "grey40", "Mesenchymal" = "firebrick4")
+
+ggplot(motif_long_mes_met, aes(tumor_origin, singleton_dist, fill = tumor_origin)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.65, width = 0.65) +
+  geom_jitter(
+    aes(color = tumor_origin),
+    width = 0.18, alpha = 0.25, size = 0.7,
+    show.legend = FALSE
+  ) +
+  stat_summary(
+    fun = median, geom = "point",
+    shape = 23, size = 2.2, fill = "white", color = "black"
+  ) +
+  stat_pvalue_manual(
+    dunn_sig_mes_met,
+    label = "p.adj.signif",
+    tip.length = 0.01,
+    inherit.aes = FALSE,
+    hide.ns = TRUE
+  ) +
+  geom_text(
+    data = kw_tests_mes_met,
+    aes(x = Inf, y = Inf, label = label),
+    inherit.aes = FALSE,
+    hjust = 1.05, vjust = 1.4,
+    size = 2.6, fontface = "italic", color = "grey30"
+  ) +
+  facet_wrap(~ motif, scales = "free_y", ncol = 3) +
+  scale_fill_manual(values = mes_colors, labels = group_labels_mes_met) +
+  scale_color_manual(values = mes_colors_dark) +
+  labs(
+    x = NULL,
+    y = "Singleton distance",
+    fill = "Tumor origin",
+    title = "TVR singleton distance: Mesenchymal vs Non-Mesenchymal origin (metastatic)"
   ) +
   theme_bw() +
   theme(
