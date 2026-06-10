@@ -2,6 +2,11 @@
 """
 HPC script: fit TabPFN locally and compute SHAP values via shapiq.
 
+Works for both classification (TabPFNClassifier, default) and regression
+(TabPFNRegressor) via --task. For regression there is no class: the imputation path
+explains predict() in TARGET space and class_index is ignored. y_train.csv / y_full.csv
+hold integer 0/1 labels for classification and the continuous target for regression.
+
 Two explainer paradigms are available via --explainer:
 
   imputation (default)
@@ -45,7 +50,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import shapiq
-from tabpfn import TabPFNClassifier
+from tabpfn import TabPFNClassifier, TabPFNRegressor
 from tabpfn_extensions.interpretability.shapiq import get_tabpfn_explainer
 
 # Tolerances for the imputation-mode self-verification step.
@@ -65,6 +70,12 @@ def parse_args():
                    default="imputation",
                    help="Explainer paradigm. Default: imputation (probability space, "
                         "self-verified).")
+    p.add_argument("--task", choices=["classification", "regression"],
+                   default="classification",
+                   help="Prediction task. classification uses TabPFNClassifier and "
+                        "explains predict_proba[:, class_index]. regression uses "
+                        "TabPFNRegressor and explains predict() in target space "
+                        "(class_index is ignored). Default: classification.")
     p.add_argument("--folds", default=None,
                    help="Path to folds.csv (single column of 1..K fold ids, row-aligned "
                         "to X_full.csv). When given, runs OOF mode and reads X_full.csv + "
@@ -84,7 +95,7 @@ def parse_args():
     return p.parse_args()
 
 
-def load_data(input_dir):
+def load_data(input_dir, task):
     paths = {
         "X_train": input_dir / "X_train.csv",
         "X_test": input_dir / "X_test.csv",
@@ -96,27 +107,62 @@ def load_data(input_dir):
             sys.exit(1)
     X_train_df = pd.read_csv(paths["X_train"])
     X_test_df = pd.read_csv(paths["X_test"])
-    y_train = pd.read_csv(paths["y_train"]).iloc[:, 0].to_numpy().astype(int)
+    y_raw = pd.read_csv(paths["y_train"]).iloc[:, 0].to_numpy()
+    y_train = y_raw.astype(int) if task == "classification" else y_raw.astype(float)
     if list(X_test_df.columns) != list(X_train_df.columns):
         print("ERROR: X_test columns do not match X_train columns.", file=sys.stderr)
         sys.exit(1)
     return X_train_df, X_test_df, y_train
 
 
-def build_explainer(explainer_kind, clf, X_bg, y_bg, proba_col, class_index, budget):
+def fit_model(task, X_tr, y_tr):
+    """Fit and return a TabPFN model for the requested task."""
+    model = TabPFNClassifier() if task == "classification" else TabPFNRegressor()
+    model.fit(X_tr, y_tr)
+    return model
+
+
+def make_predict_fn(task, model, class_index):
+    """Return (predict_fn, proba_col).
+
+    For classification, predict_fn returns predict_proba[:, class_index] and proba_col is
+    that column index. For regression, predict_fn returns predict() and proba_col is None.
+    """
+    if task == "classification":
+        classes = list(model.classes_)
+        if class_index not in classes:
+            print(f"ERROR: class label {class_index} not in model classes {classes}.",
+                  file=sys.stderr)
+            sys.exit(1)
+        proba_col = classes.index(class_index)
+
+        def predict_fn(Z, _m=model, _c=proba_col):
+            return _m.predict_proba(Z)[:, _c]
+
+        return predict_fn, proba_col
+
+    def predict_fn(Z, _m=model):
+        return _m.predict(Z)
+
+    return predict_fn, None
+
+
+def build_explainer(explainer_kind, task, model, predict_fn, X_bg, y_bg,
+                    class_index, budget):
     """Return (explainer, space) for the chosen paradigm, with X_bg as background."""
     if explainer_kind == "imputation":
-        def proba_predict(Z):
-            return clf.predict_proba(Z)[:, proba_col]
+        space = "probability" if task == "classification" else "target"
         explainer = shapiq.TabularExplainer(
-            model=proba_predict, data=X_bg, index="SV", max_order=1, imputer="marginal",
+            model=predict_fn, data=X_bg, index="SV", max_order=1, imputer="marginal",
         )
-        return explainer, "probability"
+        return explainer, space
+    # recontextualization: class_index is ignored by the extension for regressors.
     explainer = get_tabpfn_explainer(
-        model=clf, data=X_bg, labels=y_bg, index="SV", max_order=1,
-        class_index=class_index,
+        model=model, data=X_bg, labels=y_bg, index="SV", max_order=1,
+        class_index=(class_index if task == "classification" else None),
     )
-    return explainer, "logit"
+    space = "logit" if task == "classification" else "target_recontext"
+    return explainer, space
 
 
 def extract_shap(iv_list, n_features):
@@ -131,7 +177,8 @@ def extract_shap(iv_list, n_features):
 def run_oof(args, input_dir, output_dir):
     """Out-of-fold SHAP: train per fold, explain held-out fold, assemble in order."""
     X_df = pd.read_csv(input_dir / "X_full.csv")
-    y = pd.read_csv(input_dir / "y_full.csv").iloc[:, 0].to_numpy().astype(int)
+    y_raw = pd.read_csv(input_dir / "y_full.csv").iloc[:, 0].to_numpy()
+    y = y_raw.astype(int) if args.task == "classification" else y_raw.astype(float)
     folds = pd.read_csv(args.folds).iloc[:, 0].to_numpy().astype(int)
     feature_names = list(X_df.columns)
     n_features = len(feature_names)
@@ -150,36 +197,31 @@ def run_oof(args, input_dir, output_dir):
     pred_all = np.full(N, np.nan)
     space = None
 
-    print(f"OOF mode: N={N}, features={n_features}, folds={sorted(np.unique(folds))}")
-    print(f"Explainer: {args.explainer}  budget={args.budget}  class_index={class_index}")
+    print(f"OOF mode: task={args.task} N={N}, features={n_features}, "
+          f"folds={sorted(np.unique(folds))}")
+    cls_note = class_index if args.task == "classification" else "n/a"
+    print(f"Explainer: {args.explainer}  budget={args.budget}  class_index={cls_note}")
 
     for i in sorted(np.unique(folds)):
         tr = folds != i
         te = folds == i
         print(f"\n--- fold {i}: train={tr.sum()} explain={te.sum()} ---", flush=True)
-        clf = TabPFNClassifier()
-        clf.fit(X[tr], y[tr])
-        classes = list(clf.classes_)
-        if class_index not in classes:
-            print(f"ERROR fold {i}: class {class_index} not in {classes}", file=sys.stderr)
-            sys.exit(1)
-        proba_col = classes.index(class_index)
-
-        def proba_predict(Z, _clf=clf, _c=proba_col):
-            return _clf.predict_proba(Z)[:, _c]
+        model = fit_model(args.task, X[tr], y[tr])
+        predict_fn, _proba_col = make_predict_fn(args.task, model, class_index)
 
         if args.explainer == "imputation":
-            expected = float(proba_predict(X[tr]).mean())
+            expected = float(predict_fn(X[tr]).mean())
 
         explainer, space = build_explainer(
-            args.explainer, clf, X[tr], y[tr], proba_col, class_index, args.budget
+            args.explainer, args.task, model, predict_fn, X[tr], y[tr],
+            class_index, args.budget
         )
         iv_list = explainer.explain_X(
             X[te], budget=args.budget, n_jobs=args.n_jobs,
             random_state=args.seed, verbose=True,
         )
         shap_fold, base_fold = extract_shap(iv_list, n_features)
-        pred_fold = proba_predict(X[te])
+        pred_fold = predict_fn(X[te])
 
         if args.explainer == "imputation":
             bdiff = abs(float(base_fold.mean()) - expected)
@@ -208,7 +250,9 @@ def run_oof(args, input_dir, output_dir):
         ar = np.argsort(np.argsort(pred_all))
         rr = np.argsort(np.argsort(recon))
         rho = float(np.corrcoef(ar, rr)[0, 1])
-        print(f"  rank corr(reconstruction, OOF P(class={class_index})): {rho:.4f}")
+        target_desc = (f"OOF P(class={class_index})" if args.task == "classification"
+                       else "OOF prediction")
+        print(f"  rank corr(reconstruction, {target_desc}): {rho:.4f}")
         if rho < 0:
             print("  WARNING: negative rank correlation -- possible wrong class/sign.")
 
@@ -238,74 +282,50 @@ def main():
         run_oof(args, input_dir, output_dir)
         return
 
-    X_train_df, X_test_df, y_train = load_data(input_dir)
+    X_train_df, X_test_df, y_train = load_data(input_dir, args.task)
     feature_names = list(X_train_df.columns)
     n_features = len(feature_names)
     X_train = X_train_df.to_numpy().astype(float)
     X_test = X_test_df.to_numpy().astype(float)
 
     class_index = args.class_index
-    n_classes = int(y_train.max()) + 1
-    if not (0 <= class_index < n_classes):
-        print(f"ERROR: --class-index {class_index} out of range for {n_classes} classes.",
-              file=sys.stderr)
-        sys.exit(1)
 
     if args.n_explain is not None:
         X_test = X_test[:args.n_explain]
         X_test_df = X_test_df.iloc[:args.n_explain].reset_index(drop=True)
 
+    print(f"Task: {args.task}")
     print(f"Explainer: {args.explainer}")
     print(f"X_train : {X_train.shape}")
     print(f"X_test  : {X_test.shape}  (rows to explain)")
     print(f"Features: {n_features}")
-    print(f"Target class index: {class_index} "
-          f"(prevalence in train: {(y_train == class_index).mean():.4f})")
+    if args.task == "classification":
+        print(f"Target class index: {class_index} "
+              f"(prevalence in train: {(y_train == class_index).mean():.4f})")
+    else:
+        print(f"Target (train mean / std): {y_train.mean():.4f} / {y_train.std():.4f}")
 
     # --- Fit TabPFN (local, no API token required) ---
     print("\nFitting TabPFN...", flush=True)
     t0 = time.time()
-    clf = TabPFNClassifier()
-    clf.fit(X_train, y_train)
+    model = fit_model(args.task, X_train, y_train)
     print(f"Done in {time.time() - t0:.1f}s")
 
-    classes = list(clf.classes_)
-    if class_index not in classes:
-        print(f"ERROR: class label {class_index} not in model classes {classes}.",
-              file=sys.stderr)
-        sys.exit(1)
-    proba_col = classes.index(class_index)
-    print(f"Model classes: {classes} -> target predict_proba column {proba_col}")
-
-    def proba_predict(Z):
-        return clf.predict_proba(Z)[:, proba_col]
+    predict_fn, proba_col = make_predict_fn(args.task, model, class_index)
+    if args.task == "classification":
+        print(f"Model classes: {list(model.classes_)} -> "
+              f"target predict_proba column {proba_col}")
 
     # --- Build explainer ---
+    expected_baseline = (float(predict_fn(X_train).mean())
+                         if args.explainer == "imputation" else None)
     if args.explainer == "imputation":
-        space = "probability"
-        expected_baseline = float(proba_predict(X_train).mean())
-        print(f"Expected baseline (mean predict_proba over train): {expected_baseline:.4f}")
-        print(f"\nBuilding shapiq.TabularExplainer (budget={args.budget})...", flush=True)
-        explainer = shapiq.TabularExplainer(
-            model=proba_predict,
-            data=X_train,
-            index="SV",        # standard Shapley values (first order)
-            max_order=1,
-            imputer="marginal",
-        )
-    else:  # recontextualization
-        space = "logit"
-        expected_baseline = None
-        print(f"\nBuilding TabPFN recontextualization explainer (budget={args.budget})...",
-              flush=True)
-        explainer = get_tabpfn_explainer(
-            model=clf,
-            data=X_train,
-            labels=y_train,
-            index="SV",
-            max_order=1,
-            class_index=class_index,
-        )
+        print(f"Expected baseline (mean prediction over train): {expected_baseline:.4f}")
+    print(f"\nBuilding {args.explainer} explainer (budget={args.budget})...", flush=True)
+    explainer, space = build_explainer(
+        args.explainer, args.task, model, predict_fn, X_train, y_train,
+        class_index, args.budget,
+    )
 
     # --- Compute Shapley values for all test rows ---
     print(f"Computing Shapley values (n_jobs={args.n_jobs})...", flush=True)
@@ -330,48 +350,52 @@ def main():
     print(f"  baseline (from SHAP)          : {baseline:.4f}")
     if args.explainer == "imputation":
         baseline_err = abs(baseline - expected_baseline)
-        print(f"  expected (mean predict_proba) : {expected_baseline:.4f}")
+        what = "predict_proba" if args.task == "classification" else "prediction"
+        print(f"  expected (mean {what}) : {expected_baseline:.4f}")
         print(f"  |difference|                  : {baseline_err:.4f} (tol {BASELINE_TOL})")
         if baseline_err > BASELINE_TOL:
-            print("ERROR: baseline does not match the target class probability. SHAP values "
-                  "would be for the WRONG class. Aborting without writing output.",
+            print("ERROR: baseline does not match the mean model output. SHAP values "
+                  "would be for the WRONG class/target. Aborting without writing output.",
                   file=sys.stderr)
             sys.exit(2)
-        actual = proba_predict(X_test)
+        actual = predict_fn(X_test)
         recon = baselines + shap_matrix.sum(axis=1)
         add_err = np.abs(recon - actual)
         print(f"  additivity error (mean/max)   : {add_err.mean():.4g} / {add_err.max():.4g}")
         if add_err.mean() > ADDITIVITY_WARN:
             print(f"  WARNING: mean additivity error {add_err.mean():.4g} exceeds "
                   f"{ADDITIVITY_WARN}. Consider increasing --budget.")
-        print("  Class check PASSED.")
+        print("  Baseline/additivity check PASSED.")
     else:
-        # Recontextualization output is in TabPFN's native (logit-like) space, NOT
-        # probability, and the baseline is the empty-coalition (all-features-removed)
-        # reference -- it is NOT logit(mean prob), so do not compare it to prevalence.
-        # The correct correctness checks are:
+        # Recontextualization output is in TabPFN's native space (logit-like for
+        # classification, target space for regression), NOT a calibrated probability.
+        # The baseline is the empty-coalition (all-features-removed) reference -- do not
+        # compare it to prevalence/target mean. The correct checks are:
         #   (a) additivity: baseline + sum(SHAP_row) reconstructs the row's model output;
-        #   (b) class/sign: that reconstruction must INCREASE with the true class
-        #       probability (high-risk rows -> higher reconstruction).
-        actual_p = proba_predict(X_test)             # true P(class) per row, for ranking
+        #   (b) sign/class: that reconstruction must INCREASE with the model output
+        #       (high rows reconstruct higher).
+        actual_out = predict_fn(X_test)              # model output per row, for ranking
         recon = baselines + shap_matrix.sum(axis=1)  # recontextualized model output
         # Spearman (rank) correlation without scipy:
-        ar = np.argsort(np.argsort(actual_p))
+        ar = np.argsort(np.argsort(actual_out))
         rr = np.argsort(np.argsort(recon))
         if len(recon) > 1 and np.std(ar) > 0 and np.std(rr) > 0:
             spearman = float(np.corrcoef(ar, rr)[0, 1])
         else:
             spearman = float("nan")
-        print("  output space                    : recontextualized logit-like "
-              "(NOT probability)")
+        out_desc = ("recontextualized logit-like (NOT probability)"
+                    if args.task == "classification"
+                    else "recontextualized target space")
+        target_desc = (f"P(class={class_index})" if args.task == "classification"
+                       else "prediction")
+        print(f"  output space                    : {out_desc}")
         print(f"  baseline (empty-coalition ref)  : {baseline:.4f}")
-        print(f"  rank corr(reconstruction, P(class={class_index})) : {spearman:.4f}")
-        print("    -> close to +1 means the explanation correctly tracks the target "
-              "class (high-risk rows reconstruct higher). Negative would mean a "
-              "sign/class flip.")
+        print(f"  rank corr(reconstruction, {target_desc}) : {spearman:.4f}")
+        print("    -> close to +1 means the explanation correctly tracks the model "
+              "output (high rows reconstruct higher). Negative would mean a sign flip.")
         if not np.isnan(spearman) and spearman < 0:
-            print("  WARNING: negative rank correlation -- explanation may be for the "
-                  "WRONG class/sign. Inspect before using.")
+            print("  WARNING: negative rank correlation -- explanation may have a "
+                  "WRONG sign/class. Inspect before using.")
 
     # --- Save outputs ---
     pd.DataFrame(shap_matrix, columns=feature_names).to_csv(
