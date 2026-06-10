@@ -50,3 +50,18 @@ sv_rec2 <- load_shap(here("outputs", "shap_output", "output_recontext_full2"))  
 # Row-aligned labels for coloring/faceting plots (same order as sv_imp2$X rows):
 meta2 <- load_meta(here("outputs", "shap_output", "output_imputation_full2"))
 # e.g. sv_dependence(sv_imp2, v = "tf_blood_rate", color_var = meta2$alt_status)
+
+# --- Regression OOF SHAP (tTF = tf_primary_rate, bTF = tf_blood_rate) ----
+# Values are in TARGET (log1p) space; baseline = mean of per-row baselines.
+# imputation is additive & self-verified; recontext (_rec) is the author-recommended
+# cross-check in the model's native target space. Guarded so this file still sources
+# before the regression job has produced its outputs.
+load_shap_if <- function(dir) if (file.exists(file.path(dir, "shap_values.csv"))) load_shap(dir) else NULL
+
+sv_ttf_imp <- load_shap_if(here("outputs", "shap_output_ttf_imp"))
+sv_ttf_rec <- load_shap_if(here("outputs", "shap_output_ttf_rec"))
+meta_ttf   <- load_meta(here("outputs", "shap_output_ttf_imp"))
+
+sv_btf_imp <- load_shap_if(here("outputs", "shap_output_btf_imp"))
+sv_btf_rec <- load_shap_if(here("outputs", "shap_output_btf_rec"))
+meta_btf   <- load_meta(here("outputs", "shap_output_btf_imp"))
