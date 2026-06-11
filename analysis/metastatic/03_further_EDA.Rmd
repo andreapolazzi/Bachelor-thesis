@@ -46,7 +46,7 @@ We choose Spearman as our correlation method since it deals with monotonic, non-
 ```{r correlation-allreads, warning=FALSE, message=FALSE}
 ggplot(tel_data, aes(`tel_reads/total reads`, tvr_all)) +
   geom_point(alpha=0.2) +
-  geom_smooth(method = "lm", se = T)
+  geom_smooth(method = 'lm', se = TRUE)
 
 cor.test(tel_data$`tel_reads/total reads`, tel_data$tvr_all, method = 'spearman')
 ```
@@ -56,7 +56,7 @@ We can see that **telomere length shows much more correlation with TVR norm. by 
 ```{r correlation-intratel, warning=FALSE, message=FALSE}
 ggplot(tel_data, aes(`tel_reads/total reads`, tvr_intratel)) +
   geom_point(alpha=0.2) +
-  geom_smooth(method = "lm", se = T)
+  geom_smooth(method = 'lm', se = TRUE)
 
 cor.test(tel_data$`tel_reads/total reads`, tel_data$tvr_intratel, method = 'spearman')
 ```
@@ -67,7 +67,7 @@ Here we see a **weak, negative relatioship** (ρ = -0.074), **almost flat**, sug
 ```{r correlation-TF-rate, warning=FALSE, message=FALSE}
 ggplot(tel_data, aes(`tel_reads/total reads`, log1p(tumor_tf_rate))) +
   geom_point(alpha=0.2) +
-  geom_smooth(method = "lm", se = T)
+  geom_smooth(method = 'lm', se = TRUE)
 
 cor.test(tel_data$`tel_reads/total reads`, log1p(tel_data$tumor_tf_rate), method = 'spearman')
 ```

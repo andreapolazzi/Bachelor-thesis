@@ -14,8 +14,8 @@ pca_plot <- function(pca_data, coloring = pca_data[[1]], title = 'PCA'){
   p <- ggplot(pca_df, aes(PC1, PC2, color = coloring)) +
         geom_point(alpha = 0.6) +
         theme_bw() +
-        labs(x = paste0("PC1 (", round(var_explained[1]*100,1), "%)"),
-             y = paste0("PC2 (", round(var_explained[2]*100,1), "%)"),
+        labs(x = paste0('PC1 (', round(var_explained[1]*100,1), '%)'),
+             y = paste0('PC2 (', round(var_explained[2]*100,1), '%)'),
              title = title)
   
   invisible(list(plot = p, pca = pca))
@@ -50,9 +50,9 @@ pca_biplot <- function(pca_data, coloring = pca_data[[1]], scale_arrows = 10, co
           geom_point(alpha = 0.7, size = 2) +
           geom_segment(data = loadings,
                        aes(x = 0, y = 0, xend = PC1, yend = PC2),
-                       arrow = arrow(length = unit(0.25,"cm")),
+                       arrow = arrow(length = unit(0.25,'cm')),
                        inherit.aes = FALSE,
-                       color = "black") +
+                       color = 'black') +
           geom_text_repel(data = loadings,
                           aes(x = PC1, y = PC2, label = comp_names),
                           inherit.aes = FALSE,
@@ -61,8 +61,8 @@ pca_biplot <- function(pca_data, coloring = pca_data[[1]], scale_arrows = 10, co
           theme_bw() +
           labs(
             title = title,
-            x = paste0("PC1 (", round(var_explained[1]*100,1), "%)"),
-            y = paste0("PC2 (", round(var_explained[2]*100,1), "%)")
+            x = paste0('PC1 (', round(var_explained[1]*100,1), '%)'),
+            y = paste0('PC2 (', round(var_explained[2]*100,1), '%)')
           )
   
   invisible(list(plot = p, pca = pca))

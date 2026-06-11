@@ -40,7 +40,7 @@ We must account for the fact that we have many **NA values**, especially in the 
 ```{r model-data-full}
 model_data_full_rows <- complete.cases(clean_data)
 model_data_full <- clean_data[model_data_full_rows,-c(1,2)]
-model_data_full_meta <- clean_data[model_data_full_rows,c("donor_id", "cancer_type")]
+model_data_full_meta <- clean_data[model_data_full_rows,c('donor_id', 'cancer_type')]
 summary(model_data_full)
 ```
 
@@ -61,13 +61,13 @@ corr_data <- model_data_full %>%
   select(-alt_status)
 
 cor_mat <- corr_data %>%
-  cor(method = "spearman", use = "pairwise.complete.obs")
+  cor(method = 'spearman', use = 'pairwise.complete.obs')
 corrplot::corrplot(
   cor_mat,
-  method = "color",
-  type = "upper",
-  order = "hclust",
-  tl.col = "black",
+  method = 'color',
+  type = 'upper',
+  order = 'hclust',
+  tl.col = 'black',
   tl.cex = 0.55,
   tl.srt = 45
 )
@@ -78,7 +78,7 @@ corrplot::corrplot(
 ```{r PCA_full}
 # model_data_full has alt_status as first column, features after
 res_full <- pca_plot(model_data_full, coloring = model_data_full$alt_status,
-                     title = "PCA of all features")
+                     title = 'PCA of all features')
 res_full$plot
 summary(res_full$pca)
 res_full$pca$rotation
@@ -88,12 +88,12 @@ res_full$pca$rotation
 
 ```{r biplot}
 feats_full <- colnames(model_data_full)[-1]
-comp_full  <- ifelse(grepl("singleton_dist", feats_full),
-                     sub("_singleton_dist", "", feats_full), feats_full)
+comp_full  <- ifelse(grepl('singleton_dist', feats_full),
+                     sub('_singleton_dist', '', feats_full), feats_full)
 
 bip_full <- pca_biplot(model_data_full, coloring = model_data_full$alt_status,
                        scale_arrows = 10, compnames = comp_full,
-                       title = "PCA biplot of all features")
+                       title = 'PCA biplot of all features')
 bip_full$plot
 ggsave(here('outputs', 'PCA_biplot_all.pdf'), bip_full$plot, width = 7, height = 6)
 ```
@@ -105,7 +105,7 @@ ggsave(here('outputs', 'PCA_biplot_all.pdf'), bip_full$plot, width = 7, height =
 large_pca <- model_data_large %>% select(-donor_id, -cancer_type)
 
 res_large <- pca_plot(large_pca, coloring = large_pca$alt_status,
-                      title = "PCA without TERT - more patients (1943)")
+                      title = 'PCA without TERT - more patients (1943)')
 res_large$plot
 summary(res_large$pca)
 res_large$pca$rotation
@@ -115,12 +115,12 @@ res_large$pca$rotation
 
 ```{r biplot-no-tert}
 feats_large <- colnames(large_pca)[-1]
-comp_large  <- ifelse(grepl("singleton_dist", feats_large),
-                      sub("_singleton_dist", "", feats_large), feats_large)
+comp_large  <- ifelse(grepl('singleton_dist', feats_large),
+                      sub('_singleton_dist', '', feats_large), feats_large)
 
 bip_large <- pca_biplot(large_pca, coloring = large_pca$alt_status,
                         scale_arrows = 18, compnames = comp_large,
-                        title = "PCA without TERT - more patients (1943)")
+                        title = 'PCA without TERT - more patients (1943)')
 bip_large$plot
 ggsave(here('outputs', 'PCA_biplot_no_TERT.pdf'), bip_large$plot, width = 7, height = 6)
 ```
@@ -134,20 +134,20 @@ mesench_raw <- read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 # all telomere features (everything numeric except the metadata/label columns)
 mesench_features <- c(
-  "tf_primary_rate",
-  "tf_blood_rate",
-  "telomere_insertion_rate",
-  "telomere_content_log2",
-  "TERT_FPKM",
-  "ATAGGG_singleton_dist",
-  "CTAGGG_singleton_dist",
-  "GTAGGG_singleton_dist",
-  "TAAGGG_singleton_dist",
-  "TCAGGG_singleton_dist",
-  "TGAGGG_singleton_dist",
-  "TTCGGG_singleton_dist",
-  "TTGGGG_singleton_dist",
-  "TTTGGG_singleton_dist"
+  'tf_primary_rate',
+  'tf_blood_rate',
+  'telomere_insertion_rate',
+  'telomere_content_log2',
+  'TERT_FPKM',
+  'ATAGGG_singleton_dist',
+  'CTAGGG_singleton_dist',
+  'GTAGGG_singleton_dist',
+  'TAAGGG_singleton_dist',
+  'TCAGGG_singleton_dist',
+  'TGAGGG_singleton_dist',
+  'TTCGGG_singleton_dist',
+  'TTGGGG_singleton_dist',
+  'TTTGGG_singleton_dist'
 )
 
 mesench_data <- mesench_raw %>%
@@ -165,8 +165,8 @@ mesench_full <- mesench_data %>%
   drop_na()
 
 res_m <- pca_plot(mesench_full, coloring = mesench_full$cancer_group,
-                  title = paste0("PCA of all features (with TERT) - mesenchymal grouping (n = ",
-                                 nrow(mesench_full), ")"))
+                  title = paste0('PCA of all features (with TERT) - mesenchymal grouping (n = ',
+                                 nrow(mesench_full), ')'))
 res_m$plot
 summary(res_m$pca)
 ggsave(here('outputs', 'PCA_mesenchymal_all.pdf'), res_m$plot, width = 7, height = 6)
@@ -175,12 +175,12 @@ ggsave(here('outputs', 'PCA_mesenchymal_all.pdf'), res_m$plot, width = 7, height
 ### Biplot
 
 ```{r biplot-mesench-tert}
-comp_m <- ifelse(grepl("singleton_dist", mesench_features),
-                 sub("_singleton_dist", "", mesench_features), mesench_features)
+comp_m <- ifelse(grepl('singleton_dist', mesench_features),
+                 sub('_singleton_dist', '', mesench_features), mesench_features)
 
 bip_m <- pca_biplot(mesench_full, coloring = mesench_full$cancer_group,
                     scale_arrows = 10, compnames = comp_m,
-                    title = "PCA biplot (with TERT) - mesenchymal grouping")
+                    title = 'PCA biplot (with TERT) - mesenchymal grouping')
 bip_m$plot
 ggsave(here('outputs', 'PCA_biplot_mesenchymal_all.pdf'), bip_m$plot, width = 7, height = 6)
 ```
@@ -190,15 +190,15 @@ ggsave(here('outputs', 'PCA_biplot_mesenchymal_all.pdf'), bip_m$plot, width = 7,
 Dropping TERT_FPKM keeps many more samples.
 
 ```{r pca-mesench-no-tert}
-mesench_features_noT <- setdiff(mesench_features, "TERT_FPKM")
+mesench_features_noT <- setdiff(mesench_features, 'TERT_FPKM')
 
 mesench_large <- mesench_data %>%
   select(cancer_group, all_of(mesench_features_noT)) %>%
   drop_na()
 
 res_m2 <- pca_plot(mesench_large, coloring = mesench_large$cancer_group,
-                   title = paste0("PCA without TERT - mesenchymal grouping (n = ",
-                                  nrow(mesench_large), ")"))
+                   title = paste0('PCA without TERT - mesenchymal grouping (n = ',
+                                  nrow(mesench_large), ')'))
 res_m2$plot
 summary(res_m2$pca)
 ggsave(here('outputs', 'PCA_mesenchymal_no_TERT.pdf'), res_m2$plot, width = 7, height = 6)
@@ -207,12 +207,12 @@ ggsave(here('outputs', 'PCA_mesenchymal_no_TERT.pdf'), res_m2$plot, width = 7, h
 ### Biplot
 
 ```{r biplot-mesench-no-tert}
-comp_m2 <- ifelse(grepl("singleton_dist", mesench_features_noT),
-                  sub("_singleton_dist", "", mesench_features_noT), mesench_features_noT)
+comp_m2 <- ifelse(grepl('singleton_dist', mesench_features_noT),
+                  sub('_singleton_dist', '', mesench_features_noT), mesench_features_noT)
 
 bip_m2 <- pca_biplot(mesench_large, coloring = mesench_large$cancer_group,
                      scale_arrows = 18, compnames = comp_m2,
-                     title = "PCA biplot without TERT - mesenchymal grouping")
+                     title = 'PCA biplot without TERT - mesenchymal grouping')
 bip_m2$plot
 ggsave(here('outputs', 'PCA_biplot_mesenchymal_no_TERT.pdf'), bip_m2$plot, width = 7, height = 6)
 ```
@@ -235,7 +235,7 @@ As in the tTF regression notebooks, we estimate out-of-fold TreeSHAP values so t
 clean_data_shap <- model_data_full %>%
   mutate(
     alt_status_rf = factor(
-      if_else(alt_status == "ALT-high", 1, 0),
+      if_else(alt_status == 'ALT-high', 1, 0),
       levels = c(0, 1)
     )
   ) %>%
@@ -271,20 +271,20 @@ for (i in 1:k) {
   shap_list[[i]] <- list(
     shap     = shap_fold$shaps,
     X        = fold_test_shap,
-    prob     = predict(fit_rf_fold, fold_test_shap, type = "prob")[, "1"],
+    prob     = predict(fit_rf_fold, fold_test_shap, type = 'prob')[, '1'],
     baseline = rep(
-      mean(predict(fit_rf_fold, fold_train_shap, type = "prob")[, "1"]),
+      mean(predict(fit_rf_fold, fold_train_shap, type = 'prob')[, '1']),
       nrow(fold_test_shap)
     ),
     row_id   = which(folds == i)
   )
 }
 
-shap_matrix <- bind_rows(lapply(shap_list, `[[`, "shap"))
-X_matrix    <- bind_rows(lapply(shap_list, `[[`, "X"))
-rf_oof_prob <- unlist(lapply(shap_list, `[[`, "prob"))
-baseline    <- unlist(lapply(shap_list, `[[`, "baseline"))
-row_ids     <- unlist(lapply(shap_list, `[[`, "row_id"))
+shap_matrix <- bind_rows(lapply(shap_list, `[[`, 'shap'))
+X_matrix    <- bind_rows(lapply(shap_list, `[[`, 'X'))
+rf_oof_prob <- unlist(lapply(shap_list, `[[`, 'prob'))
+baseline    <- unlist(lapply(shap_list, `[[`, 'baseline'))
+row_ids     <- unlist(lapply(shap_list, `[[`, 'row_id'))
 ord         <- order(row_ids)
 
 shap_matrix <- shap_matrix[ord, ]
@@ -311,7 +311,7 @@ sv_oof_rf <- shapviz(
 
 rf_shap_importance <- shap_matrix %>%
   summarise(across(everything(), ~ mean(abs(.x)))) %>%
-  pivot_longer(everything(), names_to = "feature", values_to = "mean_abs_shap") %>%
+  pivot_longer(everything(), names_to = 'feature', values_to = 'mean_abs_shap') %>%
   arrange(desc(mean_abs_shap))
 
 rf_shap_importance
@@ -328,7 +328,7 @@ dep_by_alt <- function(v) {
   ) %>%
     ggplot(aes(feature_value, shap_value, color = alt_status)) +
     geom_point(alpha = 0.7, size = 1.5) +
-    labs(x = v, y = paste("SHAP value for", v), color = "ALT status") +
+    labs(x = v, y = paste('SHAP value for', v), color = 'ALT status') +
     theme_bw()
 }
 
@@ -340,35 +340,35 @@ dep_by_cancer <- function(v) {
   ) %>%
     ggplot(aes(feature_value, shap_value, color = cancer_type)) +
     geom_point(alpha = 0.7, size = 1.5) +
-    labs(x = v, y = paste("SHAP value for", v), color = "Cancer type") +
+    labs(x = v, y = paste('SHAP value for', v), color = 'Cancer type') +
     theme_bw()
 }
 
-sv_importance(sv_oof_rf, kind = "beeswarm", bee_adjust = 20, alpha = 0.8) +
+sv_importance(sv_oof_rf, kind = 'beeswarm', bee_adjust = 20, alpha = 0.8) +
   theme_bw()
 
-dep_by_alt("telomere_content_log2")
+dep_by_alt('telomere_content_log2')
 
-dep_by_alt("telomere_insertion_rate")
+dep_by_alt('telomere_insertion_rate')
 
-dep_by_alt("tf_rate")
+dep_by_alt('tf_rate')
 
-dep_by_alt("TERT_FPKM")
+dep_by_alt('TERT_FPKM')
 
-dep_by_cancer("telomere_content_log2")
+dep_by_cancer('telomere_content_log2')
 ```
 
 ```{r treeshap-rf-singletons, message=FALSE, warning=FALSE}
 singleton_vars <- c(
-  "ATAGGG_singleton_dist",
-  "CTAGGG_singleton_dist",
-  "GTAGGG_singleton_dist",
-  "TAAGGG_singleton_dist",
-  "TCAGGG_singleton_dist",
-  "TGAGGG_singleton_dist",
-  "TTCGGG_singleton_dist",
-  "TTGGGG_singleton_dist",
-  "TTTGGG_singleton_dist"
+  'ATAGGG_singleton_dist',
+  'CTAGGG_singleton_dist',
+  'GTAGGG_singleton_dist',
+  'TAAGGG_singleton_dist',
+  'TCAGGG_singleton_dist',
+  'TGAGGG_singleton_dist',
+  'TTCGGG_singleton_dist',
+  'TTGGGG_singleton_dist',
+  'TTTGGG_singleton_dist'
 )
 
 singleton_plots_alt <- purrr::map(
@@ -382,8 +382,8 @@ singleton_plots_alt <- purrr::map(
       )
   }
 )
-wrap_plots(singleton_plots_alt, ncol = 3, guides = "collect") +
-  plot_annotation(title = "***GGG singleton SHAP dependence")
+wrap_plots(singleton_plots_alt, ncol = 3, guides = 'collect') +
+  plot_annotation(title = '***GGG singleton SHAP dependence')
 
 singleton_plots_cancer <- purrr::map(
   singleton_vars,
@@ -396,8 +396,8 @@ singleton_plots_cancer <- purrr::map(
       )
   }
 )
-wrap_plots(singleton_plots_cancer, ncol = 3, guides = "collect") +
-  plot_annotation(title = "***GGG singleton SHAP dependence by cancer type")
+wrap_plots(singleton_plots_cancer, ncol = 3, guides = 'collect') +
+  plot_annotation(title = '***GGG singleton SHAP dependence by cancer type')
 ```
 
 # Cross Validation of the performances
@@ -405,7 +405,7 @@ wrap_plots(singleton_plots_cancer, ncol = 3, guides = "collect") +
 To assess the robustness of these two predictive models, we conducted **repeated stratified cross-validation**.
 
 ```{r metric-helper, message=FALSE, warning=FALSE}
-get_fold_metrics <- function(prob, truth, positive_class = "ALT-high", threshold = 0.5) {
+get_fold_metrics <- function(prob, truth, positive_class = 'ALT-high', threshold = 0.5) {
   
   negative_class <- setdiff(levels(truth), positive_class)
   
@@ -427,12 +427,12 @@ get_fold_metrics <- function(prob, truth, positive_class = "ALT-high", threshold
   
   tibble(
     auc = as.numeric(auc(roc_obj)),
-    sensitivity = unname(cm$byClass["Sensitivity"]),
-    specificity = unname(cm$byClass["Specificity"]),
-    precision = unname(cm$byClass["Pos Pred Value"]),
-    recall = unname(cm$byClass["Recall"]),
-    f1 = unname(cm$byClass["F1"]),
-    balanced_accuracy = unname(cm$byClass["Balanced Accuracy"])
+    sensitivity = unname(cm$byClass['Sensitivity']),
+    specificity = unname(cm$byClass['Specificity']),
+    precision = unname(cm$byClass['Pos Pred Value']),
+    recall = unname(cm$byClass['Recall']),
+    f1 = unname(cm$byClass['F1']),
+    balanced_accuracy = unname(cm$byClass['Balanced Accuracy'])
   )
 }
 ```
@@ -455,8 +455,8 @@ logreg_results <- tibble()
 for (r in 1:n_repeats) {
   fold_id <- integer(nrow(cv_data))
   
-  idx_low  <- which(cv_data$alt_status == "ALT-low")
-  idx_high <- which(cv_data$alt_status == "ALT-high")
+  idx_low  <- which(cv_data$alt_status == 'ALT-low')
+  idx_high <- which(cv_data$alt_status == 'ALT-high')
   
   fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
   fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
@@ -468,20 +468,20 @@ for (r in 1:n_repeats) {
     logreg_cv_model <- glm(
       alt_status ~ .,
       data = train_cv,
-      family = "binomial"
+      family = 'binomial'
     )
     
-    logreg_cv_prob <- predict(logreg_cv_model, test_cv, type = "response")
+    logreg_cv_prob <- predict(logreg_cv_model, test_cv, type = 'response')
     
     fold_metrics <- get_fold_metrics(
       prob = logreg_cv_prob,
       truth = test_cv$alt_status,
-      positive_class = "ALT-high"
+      positive_class = 'ALT-high'
     ) %>%
       mutate(
         rep = r,
         fold = fold,
-        model = "Logistic regression"
+        model = 'Logistic regression'
       )
     
     logreg_results <- bind_rows(logreg_results, fold_metrics)
@@ -497,7 +497,7 @@ logreg_summary <- logreg_results %>%
     across(
       c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
-      .names = "{.col}_{.fn}"
+      .names = '{.col}_{.fn}'
     )
   )
 
@@ -518,17 +518,23 @@ cv_data <- model_data_full
 k <- 5
 n_repeats <- 5
 
+# Build all stratified folds up front (before any forest is fit) so the fold
+# assignment is independent of randomForest's RNG, matching the logistic-regression CV.
+idx_low  <- which(cv_data$alt_status == 'ALT-low')
+idx_high <- which(cv_data$alt_status == 'ALT-high')
+fold_mat <- matrix(0L, nrow(cv_data), n_repeats)
+for (r in 1:n_repeats) {
+  fold_id <- integer(nrow(cv_data))
+  fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
+  fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
+  fold_mat[, r] <- fold_id
+}
+
 rf_results <- tibble()
 
 for (r in 1:n_repeats) {
-  fold_id <- integer(nrow(cv_data))
-  
-  idx_low  <- which(cv_data$alt_status == "ALT-low")
-  idx_high <- which(cv_data$alt_status == "ALT-high")
-  
-  fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
-  fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
-  
+  fold_id <- fold_mat[, r]
+
   for (fold in 1:k) {
     train_cv <- cv_data[fold_id != fold, ]
     test_cv  <- cv_data[fold_id == fold, ]
@@ -539,17 +545,17 @@ for (r in 1:n_repeats) {
       ntree = 500
     )
     
-    rf_cv_prob <- predict(rf_cv_model, test_cv, type = "prob")[, "ALT-high"]
+    rf_cv_prob <- predict(rf_cv_model, test_cv, type = 'prob')[, 'ALT-high']
     
     fold_metrics <- get_fold_metrics(
       prob = rf_cv_prob,
       truth = test_cv$alt_status,
-      positive_class = "ALT-high"
+      positive_class = 'ALT-high'
     ) %>%
       mutate(
         rep = r,
         fold = fold,
-        model = "Random forest"
+        model = 'Random forest'
       )
     
     rf_results <- bind_rows(rf_results, fold_metrics)
@@ -565,7 +571,7 @@ rf_summary <- rf_results %>%
     across(
       c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
-      .names = "{.col}_{.fn}"
+      .names = '{.col}_{.fn}'
     )
   )
 
@@ -581,9 +587,9 @@ model_comparison <- all_results %>%
     across(
       c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
-      .names = "{.col}_{.fn}"
+      .names = '{.col}_{.fn}'
     ),
-    .groups = "drop"
+    .groups = 'drop'
   )
 
 model_comparison

@@ -47,19 +47,19 @@ library(glmnet)
 library(knitr)
 
 features14 <- c(
-  "tf_primary_rate", "tf_blood_rate", "telomere_insertion_rate",
-  "telomere_content_log2", "TERT_FPKM",
-  "ATAGGG_singleton_dist", "CTAGGG_singleton_dist", "GTAGGG_singleton_dist",
-  "TAAGGG_singleton_dist", "TCAGGG_singleton_dist", "TGAGGG_singleton_dist",
-  "TTCGGG_singleton_dist", "TTGGGG_singleton_dist", "TTTGGG_singleton_dist"
+  'tf_primary_rate', 'tf_blood_rate', 'telomere_insertion_rate',
+  'telomere_content_log2', 'TERT_FPKM',
+  'ATAGGG_singleton_dist', 'CTAGGG_singleton_dist', 'GTAGGG_singleton_dist',
+  'TAAGGG_singleton_dist', 'TCAGGG_singleton_dist', 'TGAGGG_singleton_dist',
+  'TTCGGG_singleton_dist', 'TTGGGG_singleton_dist', 'TTTGGG_singleton_dist'
 )
 
-data <- read_xlsx(here("data", "processed", "PCAWG_primary.xlsx"))
+data <- read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 model_full <- data %>%
   select(all_of(features14), alt_status, donor_id, cancer_type, cancer_group) %>%
   filter(complete.cases(across(all_of(features14)))) %>%
-  mutate(alt_status = factor(alt_status, levels = c("ALT-low", "ALT-high")))
+  mutate(alt_status = factor(alt_status, levels = c('ALT-low', 'ALT-high')))
 
 model_data <- model_full %>% select(all_of(features14), alt_status)
 ```
@@ -70,7 +70,7 @@ The 25 folds are built with the same construction (and seed) as the TabPFN noteb
 so the cached TabPFN per-fold results line up one-to-one with the folds used here.
 
 ```{r folds}
-source(here("scripts", "make_folds.R"))
+source(here('scripts', 'make_folds.R'))
 k <- 5
 n_repeats <- 5
 fold_mat  <- make_folds(model_data$alt_status, k = k, n_repeats = n_repeats, seed = 21)
@@ -79,7 +79,7 @@ cv_splits <- folds_to_splits(fold_mat)
 
 ```{r metric-helpers}
 # avg_precision() + fold_metrics() — shared with notebook 10
-source(here("scripts", "clf_metrics.R"))
+source(here('scripts', 'clf_metrics.R'))
 ```
 
 # Train and score the in-R models (LR, RF, LASSO)
@@ -96,21 +96,21 @@ in_r_metrics <- tibble()
 for (s in cv_splits) {
   dtr <- model_data[s$train, ]; dte <- model_data[s$test, ]
 
-  m_lr <- suppressWarnings(glm(alt_status ~ ., data = dtr, family = "binomial"))
-  p_lr <- suppressWarnings(predict(m_lr, dte, type = "response"))
+  m_lr <- suppressWarnings(glm(alt_status ~ ., data = dtr, family = 'binomial'))
+  p_lr <- suppressWarnings(predict(m_lr, dte, type = 'response'))
 
   m_rf <- randomForest(alt_status ~ ., data = dtr, ntree = 500)
-  p_rf <- predict(m_rf, dte, type = "prob")[, "ALT-high"]
+  p_rf <- predict(m_rf, dte, type = 'prob')[, 'ALT-high']
 
   cvg  <- suppressWarnings(
-    cv.glmnet(X[s$train, ], y[s$train], alpha = 1, family = "binomial", nfolds = 10)
+    cv.glmnet(X[s$train, ], y[s$train], alpha = 1, family = 'binomial', nfolds = 10)
   )
-  p_la <- as.numeric(predict(cvg, X[s$test, ], s = "lambda.1se", type = "response"))
+  p_la <- as.numeric(predict(cvg, X[s$test, ], s = 'lambda.1se', type = 'response'))
 
   in_r_metrics <- bind_rows(in_r_metrics,
-    fold_metrics(p_lr, dte$alt_status) %>% mutate(model = "Logistic regression", rep = s$rep, fold = s$fold),
-    fold_metrics(p_rf, dte$alt_status) %>% mutate(model = "Random forest",       rep = s$rep, fold = s$fold),
-    fold_metrics(p_la, dte$alt_status) %>% mutate(model = "LASSO",               rep = s$rep, fold = s$fold)
+    fold_metrics(p_lr, dte$alt_status) %>% mutate(model = 'Logistic regression', rep = s$rep, fold = s$fold),
+    fold_metrics(p_rf, dte$alt_status) %>% mutate(model = 'Random forest',       rep = s$rep, fold = s$fold),
+    fold_metrics(p_la, dte$alt_status) %>% mutate(model = 'LASSO',               rep = s$rep, fold = s$fold)
   )
 }
 ```
@@ -122,12 +122,12 @@ labels and the 5×5 fold assignment so the standalone script reproduces these *e
 folds and writes back per-sample out-of-fold probabilities.
 
 ```{r export-tabpfn-oof}
-cmp_dir <- here("outputs", "shap_input_cmp_cv")
+cmp_dir <- here('outputs', 'shap_input_cmp_cv')
 dir.create(cmp_dir, recursive = TRUE, showWarnings = FALSE)
 
-readr::write_csv(as.data.frame(X),                          file.path(cmp_dir, "X_full.csv"))
-readr::write_csv(data.frame(y = as.integer(y == "ALT-high")), file.path(cmp_dir, "y_full.csv"))
-readr::write_csv(as.data.frame(fold_mat),                   file.path(cmp_dir, "folds_5x5.csv"))
+readr::write_csv(as.data.frame(X),                          file.path(cmp_dir, 'X_full.csv'))
+readr::write_csv(data.frame(y = as.integer(y == 'ALT-high')), file.path(cmp_dir, 'y_full.csv'))
+readr::write_csv(as.data.frame(fold_mat),                   file.path(cmp_dir, 'folds_5x5.csv'))
 
 cat(sprintf("Exported %d x %d to %s\n", nrow(X), ncol(X), cmp_dir))
 cat("Then on carmela:  python tabpfn_cv_oof.py --input-dir shap_input_cmp_cv \\\n")
@@ -143,29 +143,29 @@ results from notebook 10 (which lack per-sample probabilities, so PR-AUC shows a
 *pending*).
 
 ```{r tabpfn-metrics}
-oof_csv <- here("outputs", "tabpfn_cv_oof.csv")
+oof_csv <- here('outputs', 'tabpfn_cv_oof.csv')
 if (file.exists(oof_csv)) {
   oof <- readr::read_csv(oof_csv, show_col_types = FALSE)
   tabpfn_metrics <- oof %>%
-    mutate(truth = factor(ifelse(y == 1, "ALT-high", "ALT-low"),
-                          levels = c("ALT-low", "ALT-high"))) %>%
+    mutate(truth = factor(ifelse(y == 1, 'ALT-high', 'ALT-low'),
+                          levels = c('ALT-low', 'ALT-high'))) %>%
     group_by(rep, fold) %>%
     group_modify(~ fold_metrics(.x$yhat, .x$truth)) %>%
     ungroup() %>%
-    mutate(model = "TabPFN")
-  tabpfn_source <- "out-of-fold probabilities (carmela)"
+    mutate(model = 'TabPFN')
+  tabpfn_source <- 'out-of-fold probabilities (carmela)'
 } else {
-  tabpfn_metrics <- readRDS(here("outputs", "tabpfn_cv_results.rds"))$per_fold_metrics %>%
+  tabpfn_metrics <- readRDS(here('outputs', 'tabpfn_cv_results.rds'))$per_fold_metrics %>%
     transmute(
       auc, pr_auc = NA_real_, sensitivity, specificity,
       precision = ifelse(tp + fp > 0, tp / (tp + fp), NA_real_),
       f1        = ifelse(2 * tp + fp + fn > 0, 2 * tp / (2 * tp + fp + fn), NA_real_),
       balanced_accuracy = 0.5 * (sensitivity + specificity),
-      model = "TabPFN", rep = rep(1:5, each = 5), fold = rep(1:5, times = 5)
+      model = 'TabPFN', rep = rep(1:5, each = 5), fold = rep(1:5, times = 5)
     )
-  tabpfn_source <- "cached metrics (notebook 10) — PR-AUC pending re-run"
+  tabpfn_source <- 'cached metrics (notebook 10) — PR-AUC pending re-run'
 }
-cat("TabPFN source:", tabpfn_source, "\n")
+cat('TabPFN source:', tabpfn_source, "\n")
 ```
 
 ```{r combine-verify}
@@ -175,10 +175,10 @@ perfold <- bind_rows(
 )
 
 # fold-alignment check: cached TabPFN test-set class counts vs ours
-chk_lr <- in_r_metrics %>% filter(model == "Logistic regression") %>% arrange(rep, fold)
-chk_tp <- readRDS(here("outputs", "tabpfn_cv_results.rds"))$per_fold_metrics %>%
+chk_lr <- in_r_metrics %>% filter(model == 'Logistic regression') %>% arrange(rep, fold)
+chk_tp <- readRDS(here('outputs', 'tabpfn_cv_results.rds'))$per_fold_metrics %>%
   mutate(n_high = tp + fn, n_low = tn + fp)
-cat("Folds identical to cached TabPFN across all 25 folds: ",
+cat('Folds identical to cached TabPFN across all 25 folds: ',
     all(chk_lr$n_high == chk_tp$n_high) && all(chk_lr$n_low == chk_tp$n_low), "\n")
 ```
 
@@ -189,10 +189,10 @@ summ <- perfold %>%
   group_by(model) %>%
   summarise(across(c(auc, pr_auc, sensitivity, specificity, precision, f1, balanced_accuracy),
                    list(m = ~mean(.x, na.rm = TRUE), s = ~sd(.x, na.rm = TRUE))),
-            .groups = "drop") %>%
+            .groups = 'drop') %>%
   arrange(desc(auc_m))
 
-fmt <- function(m, s) ifelse(is.na(m), "pending", sprintf("%.3f ± %.3f", m, s))
+fmt <- function(m, s) ifelse(is.na(m), 'pending', sprintf('%.3f ± %.3f', m, s))
 tab <- summ %>% transmute(
   Model = model,
   AUC = fmt(auc_m, auc_s), `PR-AUC` = fmt(pr_auc_m, pr_auc_s),
@@ -200,36 +200,36 @@ tab <- summ %>% transmute(
   Precision = fmt(precision_m, precision_s), F1 = fmt(f1_m, f1_s),
   `Balanced acc.` = fmt(balanced_accuracy_m, balanced_accuracy_s)
 )
-readr::write_csv(tab, here("outputs", "classification_comparison_table.csv"))
-kable(tab, caption = "ALT-status classification — repeated 5x5 stratified CV (mean ± SD over 25 folds, n = 817, 14 features). Thresholded metrics at 0.5; positive class = ALT-high.")
+readr::write_csv(tab, here('outputs', 'classification_comparison_table.csv'))
+kable(tab, caption = 'ALT-status classification — repeated 5x5 stratified CV (mean ± SD over 25 folds, n = 817, 14 features). Thresholded metrics at 0.5; positive class = ALT-high.')
 ```
 
 ```{r boxplot, fig.width=9, fig.height=4.5}
-okabe <- c("#0072B2", "#E69F00", "#009E73", "#D55E00", "#CC79A7")
+okabe <- c('#0072B2', '#E69F00', '#009E73', '#D55E00', '#CC79A7')
 ord_plot <- summ %>% arrange(auc_m) %>% pull(model)
 
 plot_df <- perfold %>%
   mutate(model = factor(model, levels = ord_plot)) %>%
   select(model, rep, fold, AUC = auc, `PR-AUC` = pr_auc) %>%
-  pivot_longer(c(AUC, `PR-AUC`), names_to = "metric", values_to = "value") %>%
+  pivot_longer(c(AUC, `PR-AUC`), names_to = 'metric', values_to = 'value') %>%
   filter(!is.na(value))
 
 p <- ggplot(plot_df, aes(model, value, fill = model)) +
   geom_boxplot(alpha = .6, outlier.shape = NA, width = .6) +
   geom_jitter(width = .12, size = 1, alpha = .5) +
-  facet_wrap(~metric, scales = "free_y") +
+  facet_wrap(~metric, scales = 'free_y') +
   scale_fill_manual(values = okabe) +
   coord_flip() +
   labs(
-    title    = "ALT-status classification - repeated 5x5 stratified CV (n = 817, 14 features)",
-    subtitle = "Per-fold distribution over 25 folds; identical folds shared across all models",
+    title    = 'ALT-status classification - repeated 5x5 stratified CV (n = 817, 14 features)',
+    subtitle = 'Per-fold distribution over 25 folds; identical folds shared across all models',
     x = NULL, y = NULL
   ) +
   theme_bw(base_size = 12) +
-  theme(legend.position = "none", plot.title = element_text(face = "bold", size = 12))
+  theme(legend.position = 'none', plot.title = element_text(face = 'bold', size = 12))
 
-ggsave(here("outputs", "classification_comparison.pdf"), p, width = 9, height = 4.5)
-ggsave(here("outputs", "classification_comparison.png"), p, width = 9, height = 4.5, dpi = 150)
+ggsave(here('outputs', 'classification_comparison.pdf'), p, width = 9, height = 4.5)
+ggsave(here('outputs', 'classification_comparison.png'), p, width = 9, height = 4.5, dpi = 150)
 p
 ```
 

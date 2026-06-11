@@ -10,8 +10,8 @@ In this first approach with the Hartwig Medical Foundation data, we will work us
 
 First of all, we must load the dataset and the required packages:
 ```{r setup, message=FALSE, warning=FALSE}
+library(tidyverse)
 library(readxl)
-library(ggplot2)
 library(here)
 data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 ```
@@ -20,18 +20,18 @@ When reading an Excel file, the function `read_xlsx` often refactors columns nam
 
 ```{r rename-columns}
 
-colnames(data)[colnames(data) == "Patient_ID_IF_mod"] <- "patient_id"
+colnames(data)[colnames(data) == 'Patient_ID_IF_mod'] <- 'patient_id'
 
-colnames(data)[colnames(data) == "cancer_type...2"] <- "cancer_type"
+colnames(data)[colnames(data) == 'cancer_type...2'] <- 'cancer_type'
 
 colnames(data)[colnames(data) == 
-"Tumor_Telomere fusion rate (Gt-end/coverage*purity)...5"] <- "fusion_rate"
+'Tumor_Telomere fusion rate (Gt-end/coverage*purity)...5'] <- 'tumor_tf_rate'
 
 colnames(data)[colnames(data) ==
-"Total TVR_normalized_by_all-reads"] <- "tvr_all"
+'Total TVR_normalized_by_all-reads'] <- 'tvr_all'
 
 colnames(data)[colnames(data) ==
-"Total TVR_normalized_by_intratel-reads"] <- "tvr_intratel"
+'Total TVR_normalized_by_intratel-reads'] <- 'tvr_intratel'
 ```
 
 
@@ -44,7 +44,7 @@ Let's create a `tel_data` dataframe, from the original one `data`, containing on
 tel_data <- unique(
   data[, c(
     'patient_id',
-    'fusion_rate',
+    'tumor_tf_rate',
     'tvr_all',
     'tvr_intratel'
   )]
@@ -55,15 +55,15 @@ summary(tel_data)
 
 ## TF rate against TVR norm. by all reads
 ```{r correlation all reads, warning=FALSE}
-cor.test(tel_data$fusion_rate, tel_data$tvr_all, method = 'spearman')
+cor.test(tel_data$tumor_tf_rate, tel_data$tvr_all, method = 'spearman')
 ```
-As we can see, Spearman’s rank correlation showed a very weak positive association between `fusion_rate` and `tvr_all` (ρ = 0.093, p < 0.001, n ≈ 4000), indicating that while the relationship is statistically significant, the effect size is very small.
+As we can see, Spearman’s rank correlation showed a very weak positive association between `tumor_tf_rate` and `tvr_all` (ρ = 0.093, p < 0.001, n ≈ 4000), indicating that while the relationship is statistically significant, the effect size is very small.
 
 ## TF rate against TVR norm. by intratelomeric reads
 ```{r correlation intratel reads, warning=FALSE}
-cor.test(tel_data$fusion_rate, tel_data$tvr_intratel, method = 'spearman')
+cor.test(tel_data$tumor_tf_rate, tel_data$tvr_intratel, method = 'spearman')
 ```
-Interestingly, Spearman’s rank correlation revealed a weak negative association between `fusion_rate` and `tvr_intratel` (ρ = −0.145, p < 2.2 × 10⁻¹⁶, n ≈ 4000), indicating that higher intratelomeric TVR levels are associated with slightly lower fusion rates.
+Interestingly, Spearman’s rank correlation revealed a weak negative association between `tumor_tf_rate` and `tvr_intratel` (ρ = −0.145, p < 2.2 × 10⁻¹⁶, n ≈ 4000), indicating that higher intratelomeric TVR levels are associated with slightly lower fusion rates.
 
 The quite small effect sizes tell us that there are other factors that explain most of the variation in TF rates.
 
@@ -76,12 +76,12 @@ However, fusion rates are typically highly skewed: most tumors have very low val
 To reduce this skewness and stabilize the model, we apply a **log transformation** to the fusion rate.
 Specifically, we use the transformation:
 
-log(1 + fusion_rate)
+log(1 + tumor_tf_rate)
 
 This avoids problems with zero values while compressing extreme values.
 
 ```{r linear-model}
-model <- lm(log1p(fusion_rate) ~ tvr_intratel, data = tel_data)
+model <- lm(log1p(tumor_tf_rate) ~ tvr_intratel, data = tel_data)
 summary(model)
 ```
 There is a **statistically significant positive association** between intratelomeric TVR levels and telomere fusion rate.
@@ -92,9 +92,9 @@ TVR composition alone is not a strong predictor of telomere fusion activity.
 ```{r visualization, message=FALSE}
 ggplot(tel_data,
        aes(x = tvr_intratel,
-           y = log1p(fusion_rate))) +
+           y = log1p(tumor_tf_rate))) +
   geom_point(alpha = 0.2) +
-  geom_smooth(method = "lm", se = TRUE) +
+  geom_smooth(method = 'lm', se = TRUE) +
   theme_minimal()
 ```
 
@@ -103,7 +103,7 @@ Most tumors cluster at very low fusion rates with moderate TVR variation, indica
 # Linear relationship between TF rate and TVR all
 
 ```{r linear-model2}
-model2 <- lm(log1p(fusion_rate) ~ tvr_all, data = tel_data)
+model2 <- lm(log1p(tumor_tf_rate) ~ tvr_all, data = tel_data)
 summary(model2)
 ```
 
@@ -111,9 +111,9 @@ summary(model2)
 ```{r visualization2, message=FALSE}
 ggplot(tel_data,
        aes(x = tvr_all,
-           y = log1p(fusion_rate))) +
+           y = log1p(tumor_tf_rate))) +
   geom_point(alpha = 0.2) +
-  geom_smooth(method = "lm", se = TRUE) +
+  geom_smooth(method = 'lm', se = TRUE) +
   theme_minimal()
 ```
 
@@ -126,13 +126,13 @@ First we construct a dataframe with the required columns and keep only the top 1
 ```{r top1-TF}
 tel_data2 <- unique(
   data[, c(
-    "patient_id",
-    "fusion_rate",
-    "cancer_type"
+    'patient_id',
+    'tumor_tf_rate',
+    'cancer_type'
   )]
 )
-cutoff_99 <- quantile(tel_data2$fusion_rate, 0.99, na.rm = TRUE)
-tel_data2$top1_percent <- tel_data2$fusion_rate > cutoff_99
+cutoff_99 <- quantile(tel_data2$tumor_tf_rate, 0.99, na.rm = TRUE)
+tel_data2$top1_percent <- tel_data2$tumor_tf_rate > cutoff_99
 table(tel_data2$cancer_type[tel_data2$top1_percent])
 ```
 And we can see what cancer types and in what frequency are present in the top 1%.
@@ -202,7 +202,7 @@ tab_f <- table(
 chisq_f <- chisq.test(tab_f)
 residuals_f <- chisq_f$stdres
 res <- sort(residuals_f[,'TRUE'])
-cols <- ifelse(res > 0, "firebrick3", "steelblue3")
+cols <- ifelse(res > 0, 'firebrick3', 'steelblue3')
 
 par(mar = c(10,4,3,1))
 
@@ -210,10 +210,10 @@ barplot(res,
         las = 2,
         cex.names = 0.7,
         col = cols,
-        ylab = "Standardized residual",
-        main = "Cancer type enrichment in top 1% TF rate")
+        ylab = 'Standardized residual',
+        main = 'Cancer type enrichment in top 1% TF rate')
 
-abline(h = c(-2,0,2), lty = c(2,1,2), col = "gray40")
+abline(h = c(-2,0,2), lty = c(2,1,2), col = 'gray40')
 ```
 
 Sarcoma and Skin melanoma tumors seem to be significantly enriched for high rates of telomere fusions.
@@ -236,8 +236,8 @@ boxplot(tvr_intratel~cancer_type,
         data = tel_tvr_f,
         las = 2,
         cex.axis = 0.5,
-        main = "TVR normalized by intratel reads by cancer type",
-        ylab = "TVR_intratel",
+        main = 'TVR normalized by intratel reads by cancer type',
+        ylab = 'TVR_intratel',
         xlab = NULL)
 ```
 
@@ -256,8 +256,8 @@ barplot(medians_sorted,
         las = 2,
         cex.names = 0.6,
         cex.axis = 0.7,
-        main = "Median intratelomeric TVR by cancer type",
-        ylab = "Median TVR_intratel",
+        main = 'Median intratelomeric TVR by cancer type',
+        ylab = 'Median TVR_intratel',
         ylim = c(0,0.01))
 ```
 
@@ -269,17 +269,17 @@ Now we move on to PCA to try and find some subgroupings in our data based on TF 
 ```{r pca}
 tel_pca <- unique(
   data[,c(
-    "patient_id",
-    "cancer_type",
-    "fusion_rate",
-    "tvr_all",
-    "tvr_intratel"
+    'patient_id',
+    'cancer_type',
+    'tumor_tf_rate',
+    'tvr_all',
+    'tvr_intratel'
   )]
 )
 # To avoid stretching of the plot from extreme outliers
-tel_pca$fusion_rate <- log1p(tel_pca$fusion_rate)
+tel_pca$tumor_tf_rate <- log1p(tel_pca$tumor_tf_rate)
 
-X <- tel_pca[,c('fusion_rate', 'tvr_all', 'tvr_intratel')]
+X <- tel_pca[,c('tumor_tf_rate', 'tvr_all', 'tvr_intratel')]
 
 pca <- prcomp(X, scale. = TRUE)
 
@@ -301,7 +301,7 @@ plot(pca_scores[,1], pca_scores[,2],
      xlab = 'PC1',
      ylab = 'PC2',
      main = 'PCA of telomere features')
-legend("bottom",
+legend('bottom',
        legend = levels(as.factor(cancer_subset)),
        col = 1:length(levels(as.factor(cancer_subset))),
        pch = 19,
@@ -319,7 +319,7 @@ We could try using more variables, like all the reported TVR motifs, and see if 
 ```{r pca-extended}
 tvr_data <- unique(data[, c(1,2,seq(37,76,by=2))])
 
-colnames(tvr_data)[1:2] <- c("patient_id","cancer_type")
+colnames(tvr_data)[1:2] <- c('patient_id','cancer_type')
 
 X <- tvr_data[, 3:ncol(tvr_data)]
 
@@ -342,11 +342,11 @@ summary(pca)
 plot(pca$x[,1], pca$x[,2],
      col = as.numeric(cancer_f),
      pch = 19,
-     xlab = "PC1",
-     ylab = "PC2",
-     main = "PCA of TVR motifs (top cancers)")
+     xlab = 'PC1',
+     ylab = 'PC2',
+     main = 'PCA of TVR motifs (top cancers)')
 
-legend("topright",
+legend('topright',
        legend = levels(cancer_f),
        col = 1:length(levels(cancer_f)),
        pch = 19,
@@ -363,7 +363,7 @@ data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 clean_data <- clean_drivers_data(data)
 
 corr_data <- clean_data %>% 
-  distinct(patient_id, .keep_all = T) %>% 
+  distinct(patient_id, .keep_all = TRUE) %>%
   select(tumor_tf_rate, `Intratel_reads/total_reads`, `tel_reads/total reads`, TCAGGG_singletons_norm_by_all_reads,
         TGAGGG_singletons_norm_by_all_reads, TTGGGG_singletons_norm_by_all_reads, TTCGGG_singletons_norm_by_all_reads,
         TTTGGG_singletons_norm_by_all_reads, ATAGGG_singletons_norm_by_all_reads, CTAGGG_singletons_norm_by_all_reads,
@@ -372,13 +372,13 @@ corr_data <- clean_data %>%
   rename(tel_insertion = `Intratel_reads/total_reads`, tel_content = `tel_reads/total reads`)
 
 cor_mat <- corr_data %>%
-  cor(method = "spearman", use = "pairwise.complete.obs")
+  cor(method = 'spearman', use = 'pairwise.complete.obs')
 corrplot(
   cor_mat,
-  method = "color",
-  type = "upper",
-  order = "hclust",
-  tl.col = "black",
+  method = 'color',
+  type = 'upper',
+  order = 'hclust',
+  tl.col = 'black',
   tl.cex = 0.55,
   tl.srt = 45
 )

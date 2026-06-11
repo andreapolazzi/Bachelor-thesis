@@ -44,7 +44,7 @@ y <- model_data$alt_status
 We verify the distribution of the response variable to document class imbalance.
 
 ```{r class-balance}
-table(y, dnn = "ALT status")
+table(y, dnn = 'ALT status')
 ```
 
 # Cross-validation for λ selection
@@ -59,7 +59,7 @@ set.seed(21)
 cv_fit <- cv.glmnet(
   X, y,
   alpha = 1,
-  family = "binomial",
+  family = 'binomial',
   standardize = FALSE,  # already standardized manually
   nfolds = 10,
   keep = TRUE    # enables fit.preval for out-of-fold predictions
@@ -71,8 +71,8 @@ plot(cv_fit)
 ```
 
 ```{r lambda-values}
-cat("lambda.min:", cv_fit$lambda.min, "\n")
-cat("lambda.1se:", cv_fit$lambda.1se, "\n")
+cat('lambda.min:', cv_fit$lambda.min, "\n")
+cat('lambda.1se:', cv_fit$lambda.1se, "\n")
 ```
 
 The cross-validation plot shows that λ.min and λ.1se correspond to the same number of non-zero coefficients (7), indicating that the selected model is stable with respect to regularization strength. In other words, **increasing λ from λ.min to λ.1se does not remove any predictors**, suggesting that **all selected variables have sufficient signal** to survive additional penalization and are not borderline inclusions.
@@ -84,8 +84,8 @@ We have seen that both values for λ correspond to 7 predictors retained, but ar
 We extract and compare coefficients at both λ values. The main biological interest lies in the **selection** (which variables are sent to 0) and in the **directions and relative magnitudes** of non-zero coefficients.
 
 ```{r coefficients}
-coef_min <- coef(cv_fit, s = "lambda.min")
-coef_1se <- coef(cv_fit, s = "lambda.1se")
+coef_min <- coef(cv_fit, s = 'lambda.min')
+coef_1se <- coef(cv_fit, s = 'lambda.1se')
 
 # Build a comparison dataframe, excluding the intercept
 coef_df <- data.frame(
@@ -96,7 +96,7 @@ coef_df <- data.frame(
   mutate(
     selected_min = lambda_min != 0,
     selected_1se = lambda_1se != 0,
-    feature = gsub("_singleton_dist", "", feature)  # cleaner labels
+    feature = gsub('_singleton_dist', '', feature)  # cleaner labels
   ) %>%
   arrange(desc(abs(lambda_1se)))
 
@@ -109,26 +109,26 @@ print(coef_df)
 coef_long <- coef_df %>%
   pivot_longer(
     cols = c(lambda_min, lambda_1se),
-    names_to = "lambda",
-    values_to = "coefficient"
+    names_to = 'lambda',
+    values_to = 'coefficient'
   ) %>%
   mutate(
     lambda  = recode(lambda,
-                     lambda_min = "lambda.min",
-                     lambda_1se = "lambda.1se"),
+                     lambda_min = 'lambda.min',
+                     lambda_1se = 'lambda.1se'),
     feature = reorder(feature, abs(coefficient))
   )
 
 ggplot(coef_long, aes(x = coefficient, y = feature, fill = lambda)) +
   geom_col(position = position_dodge(width = 0.7), width = 0.6) +
-  geom_vline(xintercept = 0, linetype = "dotted", color = "grey70") +
-  scale_fill_manual(values = c("lambda.min" = "royalblue", "lambda.1se" = "coral")) +
+  geom_vline(xintercept = 0, linetype = 'dotted', color = 'grey70') +
+  scale_fill_manual(values = c('lambda.min' = 'royalblue', 'lambda.1se' = 'coral')) +
   theme_bw() +
   labs(
-    x = "LASSO coefficient (standardized scale)",
+    x = 'LASSO coefficient (standardized scale)',
     y = NULL,
-    fill = "λ",
-    title = "LASSO coefficients for ALT status prediction"
+    fill = 'λ',
+    title = 'LASSO coefficients for ALT status prediction'
   )
 ```
 
@@ -148,15 +148,15 @@ oof_probs <- cv_fit$fit.preval[, idx_1se]
 roc_lasso <- roc(
   response  = y,
   predictor = oof_probs,
-  levels    = c("ALT-low", "ALT-high"),
-  direction = "<"
+  levels    = c('ALT-low', 'ALT-high'),
+  direction = '<'
 )
 
 plot(roc_lasso,
-     main = "ROC curve - LASSO (lambda.1se, out-of-fold)",
+     main = 'ROC curve - LASSO (lambda.1se, out-of-fold)',
      xlim = c(1, 0))
 
-cat("AUC (out-of-fold, lambda.1se):", round(auc(roc_lasso), 4), "\n")
+cat('AUC (out-of-fold, lambda.1se):', round(auc(roc_lasso), 4), "\n")
 ```
 
 The ROC curve rises sharply, achieving **high sensitivity** at **near-perfect specificity**. This indicates strong discriminative performance, with the model accurately separating ALT-high from ALT-low samples based on predicted probabilities. The **AUC value is 0.9828**.
@@ -170,14 +170,14 @@ LASSO coefficients are biased toward zero by construction and cannot be used as 
 selected <- coef_df %>%
   filter(selected_1se) %>%
   pull(feature) %>%
-  gsub("^(ATAGGG|GTAGGG|TAAGGG|TCAGGG|TGAGGG|TTCGGG|TTTGGG)$",
+  gsub('^(ATAGGG|GTAGGG|TAAGGG|TCAGGG|TGAGGG|TTCGGG|TTTGGG)$',
        "\\1_singleton_dist", .)
 
 cat("Variables selected by lambda.1se:\n")
 print(selected)
 
-model_sel <- model_data[, c("alt_status", selected)]
-post_fit  <- glm(alt_status ~ ., data = model_sel, family = "binomial")
+model_sel <- model_data[, c('alt_status', selected)]
+post_fit  <- glm(alt_status ~ ., data = model_sel, family = 'binomial')
 summary(post_fit)
 ```
 
@@ -188,19 +188,19 @@ or_df <- data.frame(
   CI_low = exp(confint(post_fit))[-1, 1],
   CI_high = exp(confint(post_fit))[-1, 2]
 ) %>%
-  mutate(feature = gsub("_singleton_dist", "", feature)) %>%
+  mutate(feature = gsub('_singleton_dist', '', feature)) %>%
   arrange(OR)
 
 ggplot(or_df, aes(x = OR, y = reorder(feature, OR))) +
   geom_point(size = 3) +
   geom_errorbarh(aes(xmin = CI_low, xmax = CI_high), height = 0.3) +
-  geom_vline(xintercept = 1, linetype = "dashed", color = "grey40") +
+  geom_vline(xintercept = 1, linetype = 'dashed', color = 'grey40') +
   scale_x_log10() +
   theme_bw() +
   labs(
-    x = "Odds Ratio (log10 scale, 95% CI)",
+    x = 'Odds Ratio (log10 scale, 95% CI)',
     y = NULL,
-    title = "Odds Ratios — post-LASSO logistic regression"
+    title = 'Odds Ratios — post-LASSO logistic regression'
   )
 ```
 
@@ -214,12 +214,12 @@ summary_table <- coef_df %>%
   select(feature, lambda_min, lambda_1se) %>%
   mutate(
     across(where(is.numeric), ~ round(.x, 3)),
-    association = ifelse(lambda_1se > 0, "ALT-high", "ALT-low")
+    association = ifelse(lambda_1se > 0, 'ALT-high', 'ALT-low')
   )
 
 knitr::kable(
   summary_table,
-  col.names = c("Feature", "Coeff. lambda.min", "Coeff. lambda.1se", "Association"),
-  caption   = "Variables selected by LASSO (lambda.1se) with standardized coefficients and direction of association with ALT status."
+  col.names = c('Feature', 'Coeff. lambda.min', 'Coeff. lambda.1se', 'Association'),
+  caption   = 'Variables selected by LASSO (lambda.1se) with standardized coefficients and direction of association with ALT status.'
 )
 ```

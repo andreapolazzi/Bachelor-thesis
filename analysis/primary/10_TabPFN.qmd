@@ -16,7 +16,7 @@ execute:
 
 ```{r setup}
 library(reticulate, quietly = TRUE)
-tabpfn_venv <- here::here("analysis", ".venv-tabpfn")
+tabpfn_venv <- here::here('analysis', '.venv-tabpfn')
 use_virtualenv(tabpfn_venv, required = TRUE)
 py_config()
 
@@ -32,17 +32,17 @@ source(here('scripts', 'clf_metrics.R'))
 data <- read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 features14 <- c(
-  "tf_primary_rate", "tf_blood_rate", "telomere_insertion_rate",
-  "telomere_content_log2", "TERT_FPKM",
-  "ATAGGG_singleton_dist", "CTAGGG_singleton_dist", "GTAGGG_singleton_dist",
-  "TAAGGG_singleton_dist", "TCAGGG_singleton_dist", "TGAGGG_singleton_dist",
-  "TTCGGG_singleton_dist", "TTGGGG_singleton_dist", "TTTGGG_singleton_dist"
+  'tf_primary_rate', 'tf_blood_rate', 'telomere_insertion_rate',
+  'telomere_content_log2', 'TERT_FPKM',
+  'ATAGGG_singleton_dist', 'CTAGGG_singleton_dist', 'GTAGGG_singleton_dist',
+  'TAAGGG_singleton_dist', 'TCAGGG_singleton_dist', 'TGAGGG_singleton_dist',
+  'TTCGGG_singleton_dist', 'TTGGGG_singleton_dist', 'TTTGGG_singleton_dist'
 )
 
 model_full <- data %>%
   select(all_of(features14), alt_status, donor_id, cancer_type, cancer_group) %>%
   filter(complete.cases(across(all_of(features14)))) %>%
-  mutate(alt_status = factor(alt_status, levels = c("ALT-low", "ALT-high")))
+  mutate(alt_status = factor(alt_status, levels = c('ALT-low', 'ALT-high')))
 
 model_data <- model_full %>% select(all_of(features14), alt_status)
 
@@ -53,7 +53,7 @@ summary(model_data)
 
 ```{r export-shap-cv}
 # SHAP uses one 5-fold partition = repeat 1 of the shared CV folds (scripts/make_folds.R)
-source(here("scripts", "make_folds.R"))
+source(here('scripts', 'make_folds.R'))
 folds_vec <- make_folds(model_data$alt_status, k = 5, n_repeats = 5, seed = 21)[, 1]
 
 shap_cv_dir <- here('outputs', 'shap_input_cv')
@@ -61,7 +61,7 @@ dir.create(shap_cv_dir, recursive = TRUE, showWarnings = FALSE)
 
 readr::write_csv(model_data %>% select(all_of(features14)),
                  file.path(shap_cv_dir, 'X_full.csv'))
-readr::write_csv(data.frame(y = as.integer(model_data$alt_status == "ALT-high")),
+readr::write_csv(data.frame(y = as.integer(model_data$alt_status == 'ALT-high')),
                  file.path(shap_cv_dir, 'y_full.csv'))
 readr::write_csv(data.frame(fold = folds_vec),
                  file.path(shap_cv_dir, 'folds.csv'))
@@ -79,31 +79,31 @@ table(folds_vec, model_data$alt_status)
 We evaluate TabPFN under the same repeated **5-fold × 5-repeat stratified CV** used for Log. Reg., RF and LASSO (notebooks 02, 09, 20). TabPFN is **not** called through the cloud API here: the heavy compute runs on the GPU box (carmela) with the local `tabpfn` package via `scripts/tabpfn_cv_oof.py`, which writes per-sample out-of-fold probabilities. This chunk only builds and exports the cohort + folds; the next chunk reads the probabilities back and scores them with the shared `fold_metrics()` helper.
 
 ```{r cv-export}
-source(here("scripts", "make_folds.R"))
+source(here('scripts', 'make_folds.R'))
 fold_mat <- make_folds(model_data$alt_status, k = 5, n_repeats = 5, seed = 21)
 
-cmp_dir <- here("outputs", "shap_input_cmp_cv")
+cmp_dir <- here('outputs', 'shap_input_cmp_cv')
 dir.create(cmp_dir, recursive = TRUE, showWarnings = FALSE)
 readr::write_csv(model_data %>% select(all_of(features14)),
-                 file.path(cmp_dir, "X_full.csv"))
-readr::write_csv(data.frame(y = as.integer(model_data$alt_status == "ALT-high")),
-                 file.path(cmp_dir, "y_full.csv"))
-readr::write_csv(as.data.frame(fold_mat), file.path(cmp_dir, "folds_5x5.csv"))
-cat("Exported cohort + folds to", cmp_dir, "\n",
-    "On carmela:  python tabpfn_cv_oof.py --input-dir shap_input_cmp_cv",
+                 file.path(cmp_dir, 'X_full.csv'))
+readr::write_csv(data.frame(y = as.integer(model_data$alt_status == 'ALT-high')),
+                 file.path(cmp_dir, 'y_full.csv'))
+readr::write_csv(as.data.frame(fold_mat), file.path(cmp_dir, 'folds_5x5.csv'))
+cat('Exported cohort + folds to', cmp_dir, "\n",
+    'On carmela:  python tabpfn_cv_oof.py --input-dir shap_input_cmp_cv',
     "--output outputs/tabpfn_cv_oof.csv\n")
 ```
 
 ```{r cv-results}
-oof_csv <- here("outputs", "tabpfn_cv_oof.csv")
+oof_csv <- here('outputs', 'tabpfn_cv_oof.csv')
 if (!file.exists(oof_csv)) {
   cat("TabPFN out-of-fold probabilities not found.\n",
-      "Run scripts/tabpfn_cv_oof.py on the GPU box (carmela), then sync",
+      'Run scripts/tabpfn_cv_oof.py on the GPU box (carmela), then sync',
       "outputs/tabpfn_cv_oof.csv back.\n")
 } else {
   tabpfn_perfold <- readr::read_csv(oof_csv, show_col_types = FALSE) %>%
-    mutate(truth = factor(ifelse(y == 1, "ALT-high", "ALT-low"),
-                          levels = c("ALT-low", "ALT-high"))) %>%
+    mutate(truth = factor(ifelse(y == 1, 'ALT-high', 'ALT-low'),
+                          levels = c('ALT-low', 'ALT-high'))) %>%
     group_by(rep, fold) %>%
     group_modify(~ fold_metrics(.x$yhat, .x$truth)) %>%
     ungroup()
@@ -112,10 +112,10 @@ if (!file.exists(oof_csv)) {
   tabpfn_perfold %>%
     summarise(across(c(auc, pr_auc, sensitivity, specificity, precision, f1, balanced_accuracy),
                      list(mean = ~mean(.x, na.rm = TRUE), sd = ~sd(.x, na.rm = TRUE)),
-                     .names = "{.col}_{.fn}")) %>%
-    pivot_longer(everything(), names_to = c("metric", ".value"),
-                 names_sep = "_(?=[^_]+$)") %>%
-    mutate(summary = paste0(round(mean, 4), " ± ", round(sd, 4))) %>%
+                     .names = '{.col}_{.fn}')) %>%
+    pivot_longer(everything(), names_to = c('metric', '.value'),
+                 names_sep = '_(?=[^_]+$)') %>%
+    mutate(summary = paste0(round(mean, 4), ' ± ', round(sd, 4))) %>%
     select(metric, summary) %>%
     print()
 }
@@ -137,9 +137,9 @@ sv_rec2_rank <- recolor_by_rank(sv_rec2)
 # Imputation, single split train/test
 # sv_importance(sv_imp_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
 # sv_dependence(sv_imp_rank, v = 'telomere_insertion_rate', color_var = 'tf_rate')
-# sv_dependence(sv_imp_rank, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
-# sv_dependence(sv_imp_rank, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
-# sv_dependence(sv_imp_rank, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
+# sv_dependence(sv_imp_rank, v = 'telomere_content_log2', color_var = 'TERT_FPKM') + theme_bw()
+# sv_dependence(sv_imp_rank, v = 'tf_rate',         color_var = 'telomere_content_log2') + theme_bw()
+# sv_dependence(sv_imp_rank, v = 'TERT_FPKM',             color_var = 'TTTGGG_singleton_dist') + theme_bw()
 
 # Imputation, 5-fold CV
 # beeswarm has no per-point shape (it stacks all 14 features); shape lives on the
@@ -147,45 +147,45 @@ sv_rec2_rank <- recolor_by_rank(sv_rec2)
 sv_importance(sv_imp2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8) + theme_bw()
 sv_dependence_shape(sv_imp2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_imp2_rank, v = "telomere_content_log2", color_var = "TERT_FPKM",
+sv_dependence_shape(sv_imp2_rank, v = 'telomere_content_log2', color_var = 'TERT_FPKM',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_imp2_rank, v = "tf_primary_rate", color_var = "telomere_content_log2",
+sv_dependence_shape(sv_imp2_rank, v = 'tf_primary_rate', color_var = 'telomere_content_log2',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_imp2_rank, v = "TERT_FPKM", color_var = "TTTGGG_singleton_dist",
+sv_dependence_shape(sv_imp2_rank, v = 'TERT_FPKM', color_var = 'TTTGGG_singleton_dist',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_imp2_rank, v = "TTTGGG_singleton_dist", color_var = "TERT_FPKM",
+sv_dependence_shape(sv_imp2_rank, v = 'TTTGGG_singleton_dist', color_var = 'TERT_FPKM',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_imp2_rank, v = "TGAGGG_singleton_dist", color_var = "telomere_insertion_rate",
+sv_dependence_shape(sv_imp2_rank, v = 'TGAGGG_singleton_dist', color_var = 'telomere_insertion_rate',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_imp2_rank, v = "tf_blood_rate", color_var = "tf_primary_rate",
+sv_dependence_shape(sv_imp2_rank, v = 'tf_blood_rate', color_var = 'tf_primary_rate',
                     group = meta2$alt_status) + theme_bw()
 # Recontextualization, single split train/test
 # sv_importance(sv_rec_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
 # sv_dependence(sv_rec_rank, v = 'telomere_insertion_rate', color_var = 'tf_rate')
-# sv_dependence(sv_rec_rank, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
-# sv_dependence(sv_rec_rank, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
-# sv_dependence(sv_rec_rank, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
+# sv_dependence(sv_rec_rank, v = 'telomere_content_log2', color_var = 'TERT_FPKM') + theme_bw()
+# sv_dependence(sv_rec_rank, v = 'tf_rate',         color_var = 'telomere_content_log2') + theme_bw()
+# sv_dependence(sv_rec_rank, v = 'TERT_FPKM',             color_var = 'TTTGGG_singleton_dist') + theme_bw()
 
 # Recontextualization, 5-fold CV
 sv_importance(sv_rec2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8) + theme_bw()
 sv_dependence_shape(sv_rec2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_top(sv_rec2_rank, v = "telomere_insertion_rate", group = meta2$cancer_type, top_n = 20, shape_group = meta2$alt_status) + theme_bw()
-sv_dependence_mes(sv_rec2_rank, v = "telomere_insertion_rate", group = meta2$cancer_group, shape_group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_rec2_rank, v = "telomere_content_log2", color_var = "tf_primary_rate",
+sv_dependence_top(sv_rec2_rank, v = 'telomere_insertion_rate', group = meta2$cancer_type, top_n = 20, shape_group = meta2$alt_status) + theme_bw()
+sv_dependence_mes(sv_rec2_rank, v = 'telomere_insertion_rate', group = meta2$cancer_group, shape_group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = 'telomere_content_log2', color_var = 'tf_primary_rate',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_rec2_rank, v = "tf_primary_rate", color_var = "telomere_insertion_rate", group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = 'tf_primary_rate', color_var = 'telomere_insertion_rate', group = meta2$alt_status) + theme_bw()
 
-sv_dependence_top(sv_rec2_rank, v = "tf_primary_rate", group = meta2$cancer_type, top_n = 20,
+sv_dependence_top(sv_rec2_rank, v = 'tf_primary_rate', group = meta2$cancer_type, top_n = 20,
                   shape_group = meta2$alt_status) + theme_bw()
-sv_dependence_mes(sv_rec2_rank, v = "tf_primary_rate", group = meta2$cancer_group, shape_group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_rec2_rank, v = "TERT_FPKM", color_var = "TTTGGG_singleton_dist",
+sv_dependence_mes(sv_rec2_rank, v = 'tf_primary_rate', group = meta2$cancer_group, shape_group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = 'TERT_FPKM', color_var = 'TTTGGG_singleton_dist',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_rec2_rank, v = "TTTGGG_singleton_dist", color_var = "TERT_FPKM",
+sv_dependence_shape(sv_rec2_rank, v = 'TTTGGG_singleton_dist', color_var = 'TERT_FPKM',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_rec2_rank, v = "TGAGGG_singleton_dist", color_var = "telomere_insertion_rate",
+sv_dependence_shape(sv_rec2_rank, v = 'TGAGGG_singleton_dist', color_var = 'telomere_insertion_rate',
                     group = meta2$alt_status) + theme_bw()
-sv_dependence_shape(sv_rec2_rank, v = "tf_blood_rate", color_var = "tf_primary_rate",
+sv_dependence_shape(sv_rec2_rank, v = 'tf_blood_rate', color_var = 'tf_primary_rate',
                     group = meta2$alt_status) + theme_bw()
 ```
 
@@ -216,7 +216,7 @@ reg_data_ttf <- reg_data_raw %>%
     tf_blood_rate           = log1p(tf_blood_rate),
     telomere_insertion_rate = log1p(telomere_insertion_rate),
     TERT_FPKM               = log1p(TERT_FPKM),
-    alt_status              = as.numeric(alt_status == "ALT-high")
+    alt_status              = as.numeric(alt_status == 'ALT-high')
   ) %>%
   select(-donor_id, -cancer_type, -Specimen.Type.Summary, -cancer_group)
 
@@ -243,10 +243,10 @@ if (!file.exists(oof_ttf)) {
   ttf_metrics %>%
     summarise(across(c(rmse, mae, spearman),
                      list(mean = ~mean(.x, na.rm = TRUE), sd = ~sd(.x, na.rm = TRUE)),
-                     .names = "{.col}_{.fn}")) %>%
-    pivot_longer(everything(), names_to = c("metric", ".value"),
-                 names_sep = "_(?=[^_]+$)") %>%
-    mutate(summary = paste0(round(mean, 4), " ± ", round(sd, 4))) %>%
+                     .names = '{.col}_{.fn}')) %>%
+    pivot_longer(everything(), names_to = c('metric', '.value'),
+                 names_sep = '_(?=[^_]+$)') %>%
+    mutate(summary = paste0(round(mean, 4), ' ± ', round(sd, 4))) %>%
     select(metric, summary)
 }
 ```
@@ -355,7 +355,7 @@ reg_data_btf <- reg_data_raw %>%
     tf_blood_rate           = log1p(tf_blood_rate),
     telomere_insertion_rate = log1p(telomere_insertion_rate),
     TERT_FPKM               = log1p(TERT_FPKM),
-    alt_status              = as.numeric(alt_status == "ALT-high")
+    alt_status              = as.numeric(alt_status == 'ALT-high')
   ) %>%
   select(-donor_id, -cancer_type, -Specimen.Type.Summary, -cancer_group)
 
@@ -381,10 +381,10 @@ if (!file.exists(oof_btf)) {
   btf_metrics %>%
     summarise(across(c(rmse, mae, spearman),
                      list(mean = ~mean(.x, na.rm = TRUE), sd = ~sd(.x, na.rm = TRUE)),
-                     .names = "{.col}_{.fn}")) %>%
-    pivot_longer(everything(), names_to = c("metric", ".value"),
-                 names_sep = "_(?=[^_]+$)") %>%
-    mutate(summary = paste0(round(mean, 4), " ± ", round(sd, 4))) %>%
+                     .names = '{.col}_{.fn}')) %>%
+    pivot_longer(everything(), names_to = c('metric', '.value'),
+                 names_sep = '_(?=[^_]+$)') %>%
+    mutate(summary = paste0(round(mean, 4), ' ± ', round(sd, 4))) %>%
     select(metric, summary)
 }
 ```

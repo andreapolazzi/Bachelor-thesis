@@ -1,5 +1,5 @@
 ---
-title: "05_1_ALT_status_tf_telins"
+title: "05_ALT_status_tf_telins"
 author: 'Andrea Polazzi'
 date: '`r Sys.Date()`'
 output: html_document
@@ -39,9 +39,9 @@ ggplot(pca_df, aes(PC1, PC2, color = ALT)) +
   geom_point(alpha = 0.6) +
   theme_minimal() +
   labs(
-    title = "PCA without TF rate and telomere insertion rate",
-    x = paste0("PC1 (", round(var_explained[1]*100,1), "%)"),
-    y = paste0("PC2 (", round(var_explained[2]*100,1), "%)")
+    title = 'PCA without TF rate and telomere insertion rate',
+    x = paste0('PC1 (', round(var_explained[1]*100,1), '%)'),
+    y = paste0('PC2 (', round(var_explained[2]*100,1), '%)')
   )
 ```
 
@@ -73,9 +73,9 @@ ggplot(scores, aes(PC1, PC2, color = ALT)) +
   geom_point(alpha = 0.7, size = 2) +
   geom_segment(data = loadings,
                aes(x = 0, y = 0, xend = PC1, yend = PC2),
-               arrow = arrow(length = unit(0.25,"cm")),
+               arrow = arrow(length = unit(0.25,'cm')),
                inherit.aes = FALSE,
-               color = "black") +
+               color = 'black') +
   geom_text_repel(data = loadings,
                   aes(PC1, PC2, label = comp_names),
                   inherit.aes = FALSE,
@@ -83,12 +83,12 @@ ggplot(scores, aes(PC1, PC2, color = ALT)) +
   theme_bw() +
   coord_equal() +
   labs(
-    title = "PCA biplot without TF rate and telomere insertion rate",
-    x = "PC1",
-    y = "PC2"
+    title = 'PCA biplot without TF rate and telomere insertion rate',
+    x = 'PC1',
+    y = 'PC2'
   )
 
-ggsave(here('outputs', 'PCA_biplot_red_tf$telins.pdf'), width = 7, height = 6)
+ggsave(here('outputs', 'PCA_biplot_red_tf_telins.pdf'), width = 7, height = 6)
 ```
 
 # Split the dataset
@@ -107,19 +107,19 @@ table(test_red$alt_status, dnn = 'test')
 # First classifier: Logistic Regression
 
 ```{r logreg-reduced}
-train_red$alt_status <- relevel(train_red$alt_status, ref = "ALT-low")
+train_red$alt_status <- relevel(train_red$alt_status, ref = 'ALT-low')
 test_red$alt_status  <- factor(test_red$alt_status, levels = levels(train_red$alt_status))
 
 logreg_model_reduced <- glm(
   alt_status ~ .,
   data = train_red,
-  family = "binomial"
+  family = 'binomial'
 )
 
 prob_red <- predict(
   logreg_model_reduced,
   test_red,
-  type = "response"
+  type = 'response'
 )
 ```
 
@@ -130,7 +130,7 @@ library(pROC, quietly = T)
 roc_red <- roc(
   test_red$alt_status,
   prob_red,
-  levels = c("ALT-low","ALT-high")
+  levels = c('ALT-low','ALT-high')
 )
 
 plot(roc_red, main = 'ROC curve - Log. Reg. (all features except TF rate and tel. ins.)')
@@ -150,17 +150,17 @@ ggplot(prob_df, aes(x = prob, fill = alt_status)) +
   geom_density(alpha = 0.4) +
   theme_minimal() +
   labs(
-    title = "Predicted probability distributions",
-    x = "Predicted probability of ALT-high",
-    y = "Density"
+    title = 'Predicted probability distributions',
+    x = 'Predicted probability of ALT-high',
+    y = 'Density'
   )
 ```
 
 ### Other metrics
 
 ```{r confusion-matrix-logreg-red}
-pred_class <- ifelse(prob_red >= 0.5, "ALT-high", "ALT-low")
-pred_class <- factor(pred_class, levels = c("ALT-low", "ALT-high"))
+pred_class <- ifelse(prob_red >= 0.5, 'ALT-high', 'ALT-low')
+pred_class <- factor(pred_class, levels = c('ALT-low', 'ALT-high'))
 
 library(caret, quietly = TRUE)
 confusionMatrix(pred_class, test_red$alt_status, positive = 'ALT-high')
@@ -182,8 +182,8 @@ rf_red <- randomForest(
 rf_pred_red <- predict(
   rf_red,
   test_red,
-  type = "prob"
-)[,"ALT-high"]
+  type = 'prob'
+)[,'ALT-high']
 ```
 
 ## Evaluate performance
@@ -192,7 +192,7 @@ rf_pred_red <- predict(
 roc_rf_red <- roc(
   test_red$alt_status,
   rf_pred_red,
-  levels = c("ALT-low","ALT-high")
+  levels = c('ALT-low','ALT-high')
 )
 
 plot(roc_rf_red, main = 'ROC curve - RF (all features except TF rate and tel. ins.)')
@@ -203,15 +203,15 @@ auc(roc_rf_red)
 ### Other metrics
 
 ```{r confusion-matrix-RF}
-rf_pred_red <- ifelse(rf_pred_red >= 0.5, "ALT-high", "ALT-low")
-rf_pred_red <- factor(rf_pred_red, levels = c("ALT-low", "ALT-high"))
+rf_pred_red <- ifelse(rf_pred_red >= 0.5, 'ALT-high', 'ALT-low')
+rf_pred_red <- factor(rf_pred_red, levels = c('ALT-low', 'ALT-high'))
 
 library(caret)
 
 confusionMatrix(
   rf_pred_red,
   test_red$alt_status,
-  positive = "ALT-high"
+  positive = 'ALT-high'
 )
 ```
 
@@ -224,7 +224,7 @@ varImpPlot(rf_red, main = 'Variable importance plot - Random Forest (all feature
 To assess the robustness of these two predictive models, we conducted **repeated stratified cross-validation**.
 
 ```{r metric-helper, message=FALSE, warning=FALSE}
-get_fold_metrics <- function(prob, truth, positive_class = "ALT-high", threshold = 0.5) {
+get_fold_metrics <- function(prob, truth, positive_class = 'ALT-high', threshold = 0.5) {
   negative_class <- setdiff(levels(truth), positive_class)
   pred <- ifelse(prob > threshold, positive_class, negative_class) %>%
     factor(levels = levels(truth))
@@ -233,12 +233,12 @@ get_fold_metrics <- function(prob, truth, positive_class = "ALT-high", threshold
                  levels = c(negative_class, positive_class), quiet = TRUE)
   tibble(
     auc               = as.numeric(auc(roc_obj)),
-    sensitivity       = unname(cm$byClass["Sensitivity"]),
-    specificity       = unname(cm$byClass["Specificity"]),
-    precision         = unname(cm$byClass["Pos Pred Value"]),
-    recall            = unname(cm$byClass["Recall"]),
-    f1                = unname(cm$byClass["F1"]),
-    balanced_accuracy = unname(cm$byClass["Balanced Accuracy"])
+    sensitivity       = unname(cm$byClass['Sensitivity']),
+    specificity       = unname(cm$byClass['Specificity']),
+    precision         = unname(cm$byClass['Pos Pred Value']),
+    recall            = unname(cm$byClass['Recall']),
+    f1                = unname(cm$byClass['F1']),
+    balanced_accuracy = unname(cm$byClass['Balanced Accuracy'])
   )
 }
 ```
@@ -261,8 +261,8 @@ logreg_results <- tibble()
 for (r in 1:n_repeats) {
   fold_id <- integer(nrow(cv_data))
 
-  idx_low  <- which(cv_data$alt_status == "ALT-low")
-  idx_high <- which(cv_data$alt_status == "ALT-high")
+  idx_low  <- which(cv_data$alt_status == 'ALT-low')
+  idx_high <- which(cv_data$alt_status == 'ALT-high')
 
   fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
   fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
@@ -271,18 +271,18 @@ for (r in 1:n_repeats) {
     train_cv <- cv_data[fold_id != fold, ]
     test_cv  <- cv_data[fold_id == fold, ]
 
-    train_cv$alt_status <- relevel(train_cv$alt_status, ref = "ALT-low")
+    train_cv$alt_status <- relevel(train_cv$alt_status, ref = 'ALT-low')
     test_cv$alt_status  <- factor(test_cv$alt_status, levels = levels(train_cv$alt_status))
 
-    logreg_cv_model <- glm(alt_status ~ ., data = train_cv, family = "binomial")
-    logreg_cv_prob  <- predict(logreg_cv_model, test_cv, type = "response")
+    logreg_cv_model <- glm(alt_status ~ ., data = train_cv, family = 'binomial')
+    logreg_cv_prob  <- predict(logreg_cv_model, test_cv, type = 'response')
 
     fold_metrics <- get_fold_metrics(
       prob = logreg_cv_prob,
       truth = test_cv$alt_status,
-      positive_class = "ALT-high"
+      positive_class = 'ALT-high'
     ) %>%
-      mutate(rep = r, fold = fold, model = "Logistic regression")
+      mutate(rep = r, fold = fold, model = 'Logistic regression')
 
     logreg_results <- bind_rows(logreg_results, fold_metrics)
   }
@@ -297,7 +297,7 @@ logreg_summary <- logreg_results %>%
     across(
       c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
-      .names = "{.col}_{.fn}"
+      .names = '{.col}_{.fn}'
     )
   )
 
@@ -318,30 +318,36 @@ cv_data <- model_data_reduced
 k <- 5
 n_repeats <- 5
 
+# Build all stratified folds up front (before any forest is fit) so the fold
+# assignment is independent of randomForest's RNG, matching the logistic-regression CV.
+idx_low  <- which(cv_data$alt_status == 'ALT-low')
+idx_high <- which(cv_data$alt_status == 'ALT-high')
+fold_mat <- matrix(0L, nrow(cv_data), n_repeats)
+for (r in 1:n_repeats) {
+  fold_id <- integer(nrow(cv_data))
+  fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
+  fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
+  fold_mat[, r] <- fold_id
+}
+
 rf_results <- tibble()
 
 for (r in 1:n_repeats) {
-  fold_id <- integer(nrow(cv_data))
-
-  idx_low  <- which(cv_data$alt_status == "ALT-low")
-  idx_high <- which(cv_data$alt_status == "ALT-high")
-
-  fold_id[idx_low]  <- sample(rep(1:k, length.out = length(idx_low)))
-  fold_id[idx_high] <- sample(rep(1:k, length.out = length(idx_high)))
+  fold_id <- fold_mat[, r]
 
   for (fold in 1:k) {
     train_cv <- cv_data[fold_id != fold, ]
     test_cv  <- cv_data[fold_id == fold, ]
 
     rf_cv_model <- randomForest(alt_status ~ ., data = train_cv, ntree = 500)
-    rf_cv_prob  <- predict(rf_cv_model, test_cv, type = "prob")[, "ALT-high"]
+    rf_cv_prob  <- predict(rf_cv_model, test_cv, type = 'prob')[, 'ALT-high']
 
     fold_metrics <- get_fold_metrics(
       prob = rf_cv_prob,
       truth = test_cv$alt_status,
-      positive_class = "ALT-high"
+      positive_class = 'ALT-high'
     ) %>%
-      mutate(rep = r, fold = fold, model = "Random forest")
+      mutate(rep = r, fold = fold, model = 'Random forest')
 
     rf_results <- bind_rows(rf_results, fold_metrics)
   }
@@ -356,7 +362,7 @@ rf_summary <- rf_results %>%
     across(
       c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
-      .names = "{.col}_{.fn}"
+      .names = '{.col}_{.fn}'
     )
   )
 
@@ -372,9 +378,9 @@ model_comparison <- all_results %>%
     across(
       c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
-      .names = "{.col}_{.fn}"
+      .names = '{.col}_{.fn}'
     ),
-    .groups = "drop"
+    .groups = 'drop'
   )
 
 model_comparison

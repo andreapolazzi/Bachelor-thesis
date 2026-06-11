@@ -5,7 +5,7 @@
 #
 # IMPORTANT space difference:
 #   imputation     -> SHAP in PROBABILITY units; baseline ~0.058 = mean P(ALT-high).
-#                     Read as "feature moves P(ALT-high) by +/- x".
+#                     Read as 'feature moves P(ALT-high) by +/- x'.
 #   recontextual.  -> SHAP in TabPFN's native logit-like space (NOT probability);
 #                     baseline ~4.37 is the empty-coalition reference. Only the
 #                     ordering / relative magnitudes are interpretable; do NOT
@@ -16,12 +16,12 @@ library(shapviz)
 library(here)
 
 load_shap <- function(dir) {
-  shap <- as.matrix(read.csv(file.path(dir, "shap_values.csv"), check.names = FALSE))
-  X    <- read.csv(file.path(dir, "X_test_explained.csv"), check.names = FALSE)
-  baseline <- as.numeric(readLines(file.path(dir, "shap_baseline.txt")))
-  space    <- readLines(file.path(dir, "shap_space.txt"))
+  shap <- as.matrix(read.csv(file.path(dir, 'shap_values.csv'), check.names = FALSE))
+  X    <- read.csv(file.path(dir, 'X_test_explained.csv'), check.names = FALSE)
+  baseline <- as.numeric(readLines(file.path(dir, 'shap_baseline.txt')))
+  space    <- readLines(file.path(dir, 'shap_space.txt'))
   stopifnot(ncol(shap) == ncol(X), nrow(shap) == nrow(X))
-  message(sprintf("Loaded %s: %d rows x %d features | space=%s | baseline=%.4f",
+  message(sprintf('Loaded %s: %d rows x %d features | space=%s | baseline=%.4f',
                   dir, nrow(shap), ncol(shap), space, baseline))
   shapviz(object = shap, X = X, baseline = baseline)
 }
@@ -29,9 +29,9 @@ load_shap <- function(dir) {
 # Load the row-aligned metadata (donor_id, cancer_type, cancer_group, alt_status)
 # written alongside the OOF outputs. Returns NULL if meta.csv is absent.
 load_meta <- function(dir) {
-  path <- file.path(dir, "meta.csv")
+  path <- file.path(dir, 'meta.csv')
   if (!file.exists(path)) {
-    message("No meta.csv in ", dir)
+    message('No meta.csv in ', dir)
     return(NULL)
   }
   read.csv(path, check.names = FALSE)
@@ -44,7 +44,7 @@ load_meta <- function(dir) {
 # regression (tTF/bTF) SHAP chunks in notebook 10.
 rank01 <- function(x) {
   n <- sum(!is.na(x))
-  (rank(x, na.last = "keep", ties.method = "average") - 1) / (n - 1)
+  (rank(x, na.last = 'keep', ties.method = 'average') - 1) / (n - 1)
 }
 
 recolor_by_rank <- function(sv) {
@@ -60,8 +60,8 @@ recolor_by_rank <- function(sv) {
 # only a color aesthetic, so we attach `group` to the plot's data and map shape
 # onto the existing point layer (which pins no fixed shape).
 sv_dependence_shape <- function(sv, v, color_var, group,
-                                group_name = "alt_status",
-                                shapes = c("ALT-high" = 17, "ALT-low" = 16)) {
+                                group_name = 'alt_status',
+                                shapes = c('ALT-high' = 17, 'ALT-low' = 16)) {
   p <- sv_dependence(sv, v = v, color_var = color_var)
   p$data[[group_name]] <- factor(group)
   p +
@@ -70,17 +70,17 @@ sv_dependence_shape <- function(sv, v, color_var, group,
 }
 
 # Dependence plot that highlights the top-N most frequent levels of a categorical
-# `group` (e.g. cancer_type) and mutes everything else into a single gray "Other"
+# `group` (e.g. cancer_type) and mutes everything else into a single gray 'Other'
 # class drawn smaller and more transparent, underneath the highlighted points.
 # `group` must be row-aligned with the shapviz object (same OOF order).
 # x-axis is the feature value (rank if `sv` was rank-recolored), y is SHAP(v).
 sv_dependence_top <- function(sv, v, group, top_n = 6,
-                              group_name = "cancer_type", other_label = "Other",
-                              other_color = "grey80",
+                              group_name = 'cancer_type', other_label = 'Other',
+                              other_color = 'grey80',
                               size_top = 1.7, size_other = 0.9,
                               alpha_top = 0.9, alpha_other = 0.25,
-                              shape_group = NULL, shape_name = "alt_status",
-                              shapes = c("ALT-high" = 17, "ALT-low" = 16)) {
+                              shape_group = NULL, shape_name = 'alt_status',
+                              shapes = c('ALT-high' = 17, 'ALT-low' = 16)) {
   X <- get_feature_values(sv)
   S <- get_shap_values(sv)
   stopifnot(length(group) == nrow(S), v %in% colnames(S))
@@ -107,16 +107,16 @@ sv_dependence_top <- function(sv, v, group, top_n = 6,
   }
 
   p <- ggplot2::ggplot(df, aes_pts) +
-    ggplot2::geom_point(data = df[!df$is_top, ]) +   # gray "Other" underneath
+    ggplot2::geom_point(data = df[!df$is_top, ]) +   # gray 'Other' underneath
     ggplot2::geom_point(data = df[df$is_top, ]) +    # highlighted on top
     ggplot2::scale_color_manual(values = pal, name = group_name) +
     ggplot2::scale_size_manual(values = c(`FALSE` = size_other, `TRUE` = size_top),
-                               guide = "none") +
+                               guide = 'none') +
     ggplot2::scale_alpha_manual(values = c(`FALSE` = alpha_other, `TRUE` = alpha_top),
-                                guide = "none") +
+                                guide = 'none') +
     ggplot2::guides(color = ggplot2::guide_legend(
       override.aes = list(size = size_top, alpha = alpha_top, shape = 16))) +
-    ggplot2::labs(x = v, y = paste0("SHAP(", v, ")"))
+    ggplot2::labs(x = v, y = paste0('SHAP(', v, ')'))
 
   if (!is.null(shape_group)) {
     p <- p +
@@ -130,18 +130,18 @@ sv_dependence_top <- function(sv, v, group, top_n = 6,
 # Dependence plot that highlights mesenchymal-origin samples (the minority class
 # of interest) against a muted gray / smaller / more transparent non-mesenchymal
 # background. `group` is the row-aligned cancer_group column, with values
-# "Mesenchymal_origin" / "Non_Mesenchymal_origin" (see scripts/process_raw_data.R).
+# 'Mesenchymal_origin' / 'Non_Mesenchymal_origin' (see scripts/process_raw_data.R).
 # x-axis is the feature value (rank if `sv` was rank-recolored), y is SHAP(v).
 sv_dependence_mes <- function(sv, v, group,
-                              highlight = "Mesenchymal_origin",
-                              group_name = "origin",
-                              hi_color = "firebrick", other_color = "grey80",
+                              highlight = 'Mesenchymal_origin',
+                              group_name = 'origin',
+                              hi_color = 'firebrick', other_color = 'grey80',
                               size_hi = 1.8, size_other = 0.9,
                               alpha_hi = 0.9, alpha_other = 0.25,
-                              hi_label = "Mesenchymal",
-                              other_label = "Non-mesenchymal",
-                              shape_group = NULL, shape_name = "alt_status",
-                              shapes = c("ALT-high" = 17, "ALT-low" = 16)) {
+                              hi_label = 'Mesenchymal',
+                              other_label = 'Non-mesenchymal',
+                              shape_group = NULL, shape_name = 'alt_status',
+                              shapes = c('ALT-high' = 17, 'ALT-low' = 16)) {
   X <- get_feature_values(sv)
   S <- get_shap_values(sv)
   stopifnot(length(group) == nrow(S), v %in% colnames(S))
@@ -168,11 +168,11 @@ sv_dependence_mes <- function(sv, v, group,
     ggplot2::geom_point(data = df[!df$is_hi, ]) +   # muted non-mesenchymal underneath
     ggplot2::geom_point(data = df[df$is_hi, ]) +    # mesenchymal highlighted on top
     ggplot2::scale_color_manual(values = pal,   name = group_name) +
-    ggplot2::scale_size_manual(values = sizes,  guide = "none") +
-    ggplot2::scale_alpha_manual(values = alphs, guide = "none") +
+    ggplot2::scale_size_manual(values = sizes,  guide = 'none') +
+    ggplot2::scale_alpha_manual(values = alphs, guide = 'none') +
     ggplot2::guides(color = ggplot2::guide_legend(
       override.aes = list(size = size_hi, alpha = alpha_hi, shape = 16))) +
-    ggplot2::labs(x = v, y = paste0("SHAP(", v, ")"))
+    ggplot2::labs(x = v, y = paste0('SHAP(', v, ')'))
 
   if (!is.null(shape_group)) {
     p <- p +
@@ -183,31 +183,31 @@ sv_dependence_mes <- function(sv, v, group,
   p
 }
 
-sv_imp <- load_shap(here("outputs", "shap_output", "output_imputation_full"))   # probability space
-sv_rec <- load_shap(here("outputs", "shap_output", "output_recontext_full"))    # logit-like space
+sv_imp <- load_shap(here('outputs', 'shap_output', 'output_imputation_full'))   # probability space
+sv_rec <- load_shap(here('outputs', 'shap_output', 'output_recontext_full'))    # logit-like space
 
 # --- 5-fold out-of-fold, blood-inclusive (full2) ------------------------
 # Each row is explained out-of-fold; baseline used here is the mean of the
 # per-row (per-fold) baselines. Per-row baselines are in baselines.csv if you
 # need exact per-sample reconstruction.
-sv_imp2 <- load_shap(here("outputs", "shap_output", "output_imputation_full2"))  # probability
-sv_rec2 <- load_shap(here("outputs", "shap_output", "output_recontext_full2"))   # logit-like
+sv_imp2 <- load_shap(here('outputs', 'shap_output', 'output_imputation_full2'))  # probability
+sv_rec2 <- load_shap(here('outputs', 'shap_output', 'output_recontext_full2'))   # logit-like
 
 # Row-aligned labels for coloring/faceting plots (same order as sv_imp2$X rows):
-meta2 <- load_meta(here("outputs", "shap_output", "output_imputation_full2"))
-# e.g. sv_dependence(sv_imp2, v = "tf_blood_rate", color_var = meta2$alt_status)
+meta2 <- load_meta(here('outputs', 'shap_output', 'output_imputation_full2'))
+# e.g. sv_dependence(sv_imp2, v = 'tf_blood_rate', color_var = meta2$alt_status)
 
 # --- Regression OOF SHAP (tTF = tf_primary_rate, bTF = tf_blood_rate) ----
 # Values are in TARGET (log1p) space; baseline = mean of per-row baselines.
 # imputation is additive & self-verified; recontext (_rec) is the author-recommended
 # cross-check in the model's native target space. Guarded so this file still sources
 # before the regression job has produced its outputs.
-load_shap_if <- function(dir) if (file.exists(file.path(dir, "shap_values.csv"))) load_shap(dir) else NULL
+load_shap_if <- function(dir) if (file.exists(file.path(dir, 'shap_values.csv'))) load_shap(dir) else NULL
 
-sv_ttf_imp <- load_shap_if(here("outputs", "shap_output_ttf_imp"))
-sv_ttf_rec <- load_shap_if(here("outputs", "shap_output_ttf_rec"))
-meta_ttf   <- load_meta(here("outputs", "shap_output_ttf_imp"))
+sv_ttf_imp <- load_shap_if(here('outputs', 'shap_output_ttf_imp'))
+sv_ttf_rec <- load_shap_if(here('outputs', 'shap_output_ttf_rec'))
+meta_ttf   <- load_meta(here('outputs', 'shap_output_ttf_imp'))
 
-sv_btf_imp <- load_shap_if(here("outputs", "shap_output_btf_imp"))
-sv_btf_rec <- load_shap_if(here("outputs", "shap_output_btf_rec"))
-meta_btf   <- load_meta(here("outputs", "shap_output_btf_imp"))
+sv_btf_imp <- load_shap_if(here('outputs', 'shap_output_btf_imp'))
+sv_btf_rec <- load_shap_if(here('outputs', 'shap_output_btf_rec'))
+meta_btf   <- load_meta(here('outputs', 'shap_output_btf_imp'))

@@ -8,7 +8,7 @@ output: html_document
 # Setup
 
 ```{r setup, warning=FALSE}
-library(tidyverse, quietly = T)
+library(tidyverse, quietly = TRUE)
 library(readxl)
 library(here)
 source(here('scripts', 'clean_columns.R'))
@@ -19,7 +19,7 @@ metastatic_mesenchymal <- read_xlsx(here('data', 'processed', 'metastatic_red_ed
 clean_data <- clean_drivers_data(data)
 
 clean_data <- clean_data %>% 
-  distinct(patient_id, .keep_all = T) %>% 
+  distinct(patient_id, .keep_all = TRUE) %>%
   select(tumor_tf_rate, `Intratel_reads/total_reads`, `tel_reads/total reads`, TCAGGG_singletons_norm_by_all_reads,
         TGAGGG_singletons_norm_by_all_reads, TTGGGG_singletons_norm_by_all_reads, TTCGGG_singletons_norm_by_all_reads,
         TTTGGG_singletons_norm_by_all_reads, ATAGGG_singletons_norm_by_all_reads, CTAGGG_singletons_norm_by_all_reads,
@@ -38,9 +38,9 @@ Here we repeat the PCA/biplot workflow used in `02_ALT_status_full.Rmd`, but usi
 
 ```{r metastatic-mesenchymal-pca-data}
 metastatic_features <- c(
-  "tumor_tf_rate",
-  "blood_tf_rate",
-  grep("_singleton_dist$", names(metastatic_mesenchymal), value = TRUE)
+  'tumor_tf_rate',
+  'blood_tf_rate',
+  grep('_singleton_dist$', names(metastatic_mesenchymal), value = TRUE)
 )
 
 metastatic_pca_data <- metastatic_mesenchymal %>%
@@ -58,7 +58,7 @@ summary(metastatic_pca_data)
 res_met <- pca_plot(
   metastatic_pca_data,
   coloring = metastatic_pca_data$tumor_origin,
-  title = paste0("PCA - metastatic tumor origin (n = ", nrow(metastatic_pca_data), ")")
+  title = paste0('PCA - metastatic tumor origin (n = ', nrow(metastatic_pca_data), ')')
 )
 
 res_met$plot
@@ -71,8 +71,8 @@ ggsave(here('outputs', 'PCA_metastatic_tumor_origin.pdf'), res_met$plot, width =
 
 ```{r biplot-metastatic-mesenchymal}
 comp_met <- ifelse(
-  grepl("singleton_dist", metastatic_features),
-  sub("_singleton_dist", "", metastatic_features),
+  grepl('singleton_dist', metastatic_features),
+  sub('_singleton_dist', '', metastatic_features),
   metastatic_features
 )
 
@@ -81,7 +81,7 @@ bip_met <- pca_biplot(
   coloring = metastatic_pca_data$tumor_origin,
   scale_arrows = 15,
   compnames = comp_met,
-  title = "PCA biplot - metastatic tumor origin"
+  title = 'PCA biplot - metastatic tumor origin'
 )
 
 bip_met$plot

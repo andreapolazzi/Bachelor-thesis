@@ -14,7 +14,6 @@ execute:
 ```{r setup}
 library(tidyverse)
 library(here)
-library(corrplot)
 data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 clean_data <- data
 summary(clean_data)
@@ -31,9 +30,9 @@ summary(clean_data$tf_primary_rate)
 zero_blood <- sum(clean_data$tf_blood_rate == 0)/nrow(clean_data) * 100
 zero_primary <- sum(clean_data$tf_primary_rate == 0)/nrow(clean_data) * 100
 
-cat("Percentuale di zeri in tf_blood_rate: ", zero_blood, "%\n")
+cat('Percentage of zeros in tf_blood_rate: ', zero_blood, "%\n")
 
-cat("Percentuale di zeri in tf_primary_rate: ", zero_primary, "%\n")
+cat('Percentage of zeros in tf_primary_rate: ', zero_primary, "%\n")
 ```
 
 ## Distributions - visual
@@ -41,23 +40,23 @@ cat("Percentuale di zeri in tf_primary_rate: ", zero_primary, "%\n")
 ```{r visual-distributions}
 clean_data %>% 
   ggplot(aes(x = tf_blood_rate)) +
-  geom_histogram(binwidth = 0.01, fill = "blue", color = "black", alpha = 0.7) +
-  labs(title = "Distribution of tf_blood_rate", x = "tf_blood_rate", y = "Frequency")
+  geom_histogram(binwidth = 0.01, fill = 'blue', color = 'black', alpha = 0.7) +
+  labs(title = 'Distribution of tf_blood_rate', x = 'tf_blood_rate', y = 'Frequency')
 
 clean_data %>% 
   ggplot(aes(x = tf_primary_rate)) +
-  geom_histogram(binwidth = 0.1, fill = "green", color = "black", alpha = 0.7) +
-  labs(title = "Distribution of tf_primary_rate", x = "tf_primary_rate", y = "Frequency")
+  geom_histogram(binwidth = 0.1, fill = 'green', color = 'black', alpha = 0.7) +
+  labs(title = 'Distribution of tf_primary_rate', x = 'tf_primary_rate', y = 'Frequency')
 
 clean_data %>% 
-  ggplot(aes(x = "", y = tf_blood_rate)) +
-  geom_boxplot(fill = "blue", color = "black") +
-  labs(title = "Boxplot of tf_blood_rate", y = "tf_blood_rate")
+  ggplot(aes(x = '', y = tf_blood_rate)) +
+  geom_boxplot(fill = 'blue', color = 'black') +
+  labs(title = 'Boxplot of tf_blood_rate', y = 'tf_blood_rate')
 
 clean_data %>% 
-  ggplot(aes(x = "", y = tf_primary_rate)) +
-  geom_boxplot(fill = "green", color = "black") +
-  labs(title = "Boxplot of tf_primary_rate", y = "tf_primary_rate")
+  ggplot(aes(x = '', y = tf_primary_rate)) +
+  geom_boxplot(fill = 'green', color = 'black') +
+  labs(title = 'Boxplot of tf_primary_rate', y = 'tf_primary_rate')
 ```
 
 # Scatter plots
@@ -67,8 +66,8 @@ clean_data %>%
 ```{r scatterplot-raw}
 clean_data %>% 
   ggplot(aes(tf_blood_rate, tf_primary_rate)) +
-  geom_point(alpha = 0.5, color = "darkblue") +
-  labs(title = "Scatterplot tf_blood_rate vs tf_primary_rate", x = "tf_blood_rate", y = "tf_primary_rate")
+  geom_point(alpha = 0.5, color = 'darkblue') +
+  labs(title = 'Scatterplot tf_blood_rate vs tf_primary_rate', x = 'tf_blood_rate', y = 'tf_primary_rate')
 ```
 
 ## Scatterplot log1p transformed
@@ -77,7 +76,7 @@ clean_data %>%
 clean_data %>% 
   ggplot(aes(log1p(tf_blood_rate), log1p(tf_primary_rate), color = alt_status)) +
   geom_point(alpha = 0.5) +
-  labs(title = "Scatterplot log1p(tf_blood_rate) vs log1p(tf_primary_rate)", x = "log1p(tf_blood_rate)", y = "log1p(tf_primary_rate)")
+  labs(title = 'Scatterplot log1p(tf_blood_rate) vs log1p(tf_primary_rate)', x = 'log1p(tf_blood_rate)', y = 'log1p(tf_primary_rate)')
 ```
 
 # Distinction zero vs positive
@@ -91,9 +90,9 @@ table(clean_data$blood_pos, clean_data$primary_pos, dnn = c('blood_pos', 'primar
 chisq.test(table(clean_data$blood_pos, clean_data$primary_pos))
 
 ggplot(clean_data, aes(x = as.factor(blood_pos), fill = as.factor(primary_pos))) +
-  geom_bar(position = "fill") +
-  labs(title = "Proportion of signal presence between blood and primary", x = "blood_pos", y = "Proporzione") +
-  scale_fill_manual(values = c("red", "green"), labels = c("0", "1"))
+  geom_bar(position = 'fill') +
+  labs(title = 'Proportion of signal presence between blood and primary', x = 'blood_pos', y = 'Proportion') +
+  scale_fill_manual(values = c('red', 'green'), labels = c('0', '1'))
 ```
 
 # Discordant samples: primary TF = 0, blood TF \> 0
@@ -104,10 +103,10 @@ ggplot(clean_data, aes(x = as.factor(blood_pos), fill = as.factor(primary_pos)))
 # Samples with no detectable primary TF but positive blood TF
 discordant <- clean_data %>%
   mutate(group = case_when(
-    primary_pos == 0 & blood_pos == 1 ~ "primary=0, blood>0",
-    primary_pos == 1 & blood_pos == 1 ~ "both>0",
-    primary_pos == 1 & blood_pos == 0 ~ "primary>0, blood=0",
-    TRUE ~ "both=0"
+    primary_pos == 0 & blood_pos == 1 ~ 'primary=0, blood>0',
+    primary_pos == 1 & blood_pos == 1 ~ 'both>0',
+    primary_pos == 1 & blood_pos == 0 ~ 'primary>0, blood=0',
+    TRUE ~ 'both=0'
   ))
 
 cat("Group counts:\n")
@@ -115,18 +114,18 @@ print(table(discordant$group))
 
 # Focus on discordant group vs the rest (excluding both=0 as uninformative)
 disc_subset <- discordant %>%
-  filter(group %in% c("primary=0, blood>0", "both>0", "primary>0, blood=0")) %>%
-  mutate(is_discordant = group == "primary=0, blood>0")
+  filter(group %in% c('primary=0, blood>0', 'both>0', 'primary>0, blood=0')) %>%
+  mutate(is_discordant = group == 'primary=0, blood>0')
 
 cat("\nALT status in discordant group (primary=0, blood>0):\n")
-print(table(discordant$alt_status[discordant$group == "primary=0, blood>0"]))
+print(table(discordant$alt_status[discordant$group == 'primary=0, blood>0']))
 
 cat("\nALT status in non-discordant groups:\n")
-print(table(discordant$alt_status[discordant$group != "primary=0, blood>0"]))
+print(table(discordant$alt_status[discordant$group != 'primary=0, blood>0']))
 
 # Fisher's exact test: is ALT-low enriched in discordant samples?
 ct <- table(disc_subset$is_discordant, disc_subset$alt_status)
-rownames(ct) <- c("other", "discordant")
+rownames(ct) <- c('other', 'discordant')
 print(ct)
 fisher_res <- fisher.test(ct)
 cat("\nFisher's exact test (discordant vs other groups, ALT-low enrichment):\n")
@@ -138,13 +137,13 @@ print(fisher_res)
 ```{r discordant-alt-plot}
 # Bar chart: ALT status proportions by group
 discordant %>%
-  filter(group != "both=0") %>%
+  filter(group != 'both=0') %>%
   ggplot(aes(x = group, fill = alt_status)) +
-  geom_bar(position = "fill") +
-  scale_fill_manual(values = c("ALT-high" = "#E74C3C", "ALT-low" = "#3498DB")) +
+  geom_bar(position = 'fill') +
+  scale_fill_manual(values = c('ALT-high' = '#E74C3C', 'ALT-low' = '#3498DB')) +
   labs(
-    title = "ALT status proportion by TF signal group",
-    x = NULL, y = "Proportion", fill = "ALT status"
+    title = 'ALT status proportion by TF signal group',
+    x = NULL, y = 'Proportion', fill = 'ALT status'
   ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 20, hjust = 1))
@@ -157,9 +156,9 @@ disc_pct <- discordant %>%
   group_by(cancer_type) %>%
   summarise(
     n_total  = n(),
-    n_disc   = sum(group == "primary=0, blood>0"),
+    n_disc   = sum(group == 'primary=0, blood>0'),
     pct_disc = n_disc / n_total * 100,
-    .groups  = "drop"
+    .groups  = 'drop'
   ) %>%
   filter(n_total >= 10) %>%
   arrange(desc(pct_disc))
@@ -170,11 +169,11 @@ ggplot(disc_pct, aes(x = pct_disc, y = reorder(cancer_type, pct_disc))) +
   geom_segment(aes(x = 0, xend = pct_disc,
                    y = reorder(cancer_type, pct_disc),
                    yend = reorder(cancer_type, pct_disc)),
-               color = "grey70") +
-  geom_point(size = 3, color = "#2C3E50") +
+               color = 'grey70') +
+  geom_point(size = 3, color = '#2C3E50') +
   labs(
-    title = "Discordant rate by cancer type (primary=0, blood>0)",
-    x = "% discordant", y = NULL
+    title = 'Discordant rate by cancer type (primary=0, blood>0)',
+    x = '% discordant', y = NULL
   ) +
   theme_minimal()
 ```
@@ -194,7 +193,7 @@ cor.test(positive_data$tf_blood_rate[positive_data$blood_pos == 1],
 
 ```{r relationship-visualization}
 ggplot(positive_data, aes(x = log1p(tf_blood_rate), y = log1p(tf_primary_rate))) +
-  geom_point(alpha = 0.5, color = "darkred") +
-  geom_smooth(method = "loess", color = "blue") +
-  labs(title = "tf_blood_rate vs tf_primary_rate", x = "log1p(tf_blood_rate)", y = "log1p(tf_primary_rate)")
+  geom_point(alpha = 0.5, color = 'darkred') +
+  geom_smooth(method = 'loess', color = 'blue') +
+  labs(title = 'tf_blood_rate vs tf_primary_rate', x = 'log1p(tf_blood_rate)', y = 'log1p(tf_primary_rate)')
 ```

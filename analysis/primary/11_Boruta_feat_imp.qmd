@@ -1,5 +1,5 @@
 ---
-title: "14_Boruta_feat_imp"
+title: "11_Boruta_feat_imp"
 date: today
 format:
   html:
@@ -15,6 +15,7 @@ execute:
 library(tidyverse)
 library(Boruta)
 library(randomForest)
+library(caret)
 library(here)
 source(here('scripts', 'clean_columns.R'))
 data <- readxl::read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
@@ -56,7 +57,7 @@ run_boruta_once <- function(data) {
   )
   
   stats <- attStats(bor) %>%
-    rownames_to_column("feature") %>%
+    rownames_to_column('feature') %>%
     select(feature, decision)
   
   return(stats)
@@ -67,16 +68,16 @@ run_boruta_once <- function(data) {
 n_runs <- 20
 
 boruta_results <- map_dfr(1:n_runs, ~{
-  cat("Run:", .x, "\n")
+  cat('Run:', .x, "\n")
   run_boruta_once(clean_data %>% select(-c(1,2)))
-}, .id = "run")
+}, .id = 'run')
 
 feature_stability <- boruta_results %>%
   group_by(feature) %>%
   summarise(
-    confirmed_pct = mean(decision == "Confirmed"),
-    tentative_pct = mean(decision == "Tentative"),
-    rejected_pct = mean(decision == "Rejected")
+    confirmed_pct = mean(decision == 'Confirmed'),
+    tentative_pct = mean(decision == 'Tentative'),
+    rejected_pct = mean(decision == 'Rejected')
   ) %>%
   arrange(desc(confirmed_pct))
 

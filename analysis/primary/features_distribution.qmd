@@ -288,8 +288,7 @@ stats_mod <- data %>%
   add_xy_position(x = 'TERT_mod')
 
 data %>%
-  filter(!is.na(TERT_FPKM)) %>%
-  drop_na() %>%
+  filter(!is.na(TERT_FPKM), !is.na(TERT_mod)) %>%
   ggplot(aes(x = TERT_mod, y = log1p(TERT_FPKM), fill = TERT_mod)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
   geom_jitter(width = 0.15, alpha = 0.3, size = 0.8) +
@@ -349,8 +348,8 @@ LASSO and SHAP analyses on `tf_primary_rate` occasionally assign small positive 
 ## Marginal and partial correlations with tf_primary_rate
 
 ```{r tert-correlations}
-# Marginal correlation
-r_marginal <- cor(data$TERT_FPKM, data$tf_primary_rate, use = "complete.obs")
+# Marginal correlation (TERT on the same log1p scale used everywhere else)
+r_marginal <- cor(log1p(data$TERT_FPKM), data$tf_primary_rate, use = "complete.obs")
 
 # Partial correlation controlling for telomere_content_log2
 d_cc <- data %>%
@@ -361,7 +360,7 @@ resid_tf   <- residuals(lm(tf_primary_rate   ~ telomere_content_log2, data = d_c
 r_partial  <- cor(resid_tert, resid_tf)
 
 # Correlation of TERT with the true predictors
-r_tc  <- cor(data$TERT_FPKM, data$telomere_content_log2, use = "complete.obs")
+r_tc  <- cor(log1p(data$TERT_FPKM), data$telomere_content_log2, use = "complete.obs")
 
 # R2 of TERT alone
 d_r2 <- data %>% filter(!is.na(TERT_FPKM), !is.na(tf_primary_rate))

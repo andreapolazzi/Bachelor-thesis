@@ -38,7 +38,7 @@ clean_data <- clean_data %>%
     TERT_FPKM = log1p(TERT_FPKM),
     alt_status = factor(
       alt_status,
-      levels = c("ALT-low", "ALT-high")
+      levels = c('ALT-low', 'ALT-high')
     )
   ) %>% 
   select(-donor_id, -cancer_type, -Specimen.Type.Summary, -tf_primary_rate)
@@ -46,7 +46,7 @@ clean_data <- clean_data %>%
 
 # Split the dataset
 
-We split the dataset with a 70/30 split in training set and test set. We won't touch the latter until final performance estimation, to avoid data leakage.
+We split the dataset with an 80/20 split in training set and test set. We won't touch the latter until final performance estimation, to avoid data leakage.
 
 ```{r train-test}
 set.seed(21)
@@ -95,9 +95,9 @@ for (rep in 1:n_repeats){
     fold_test <- train[folds==i,]
     
     # Standardize the predictors
-    cols_to_scale <- setdiff(names(fold_train), c("tf_blood_rate", "alt_status"))
+    cols_to_scale <- setdiff(names(fold_train), c('tf_blood_rate', 'alt_status'))
     preproc <- preProcess(fold_train %>% select(all_of(cols_to_scale)),
-                           method = c("center", "scale"))
+                           method = c('center', 'scale'))
     fold_train_s <- fold_train %>%
       mutate(predict(preproc, fold_train %>% select(all_of(cols_to_scale))))
     fold_test_s  <- fold_test %>%
@@ -173,17 +173,17 @@ cv_summary
 ```
 
 ```{r cv-performance-plot}
-cv_results |>
-  pivot_longer(c(rmse, r2), names_to = "metric", values_to = "value") |>
-  mutate(model = fct_reorder(model, value, .fun = mean)) |>
+cv_results %>%
+  pivot_longer(c(rmse, r2), names_to = 'metric', values_to = 'value') %>%
+  mutate(model = fct_reorder(model, value, .fun = mean)) %>%
   ggplot(aes(x = model, y = value, fill = model)) +
   geom_boxplot(alpha = 0.7, outlier.shape = 21) +
-  facet_wrap(~metric, scales = "free_y",
-             labeller = labeller(metric = c(rmse = "RMSE", r2 = "R²"))) +
-  labs(title = "Metrics distribution per fold (5-fold)",
+  facet_wrap(~metric, scales = 'free_y',
+             labeller = labeller(metric = c(rmse = 'RMSE', r2 = 'R²'))) +
+  labs(title = 'Metrics distribution per fold (5-fold)',
        x = NULL, y = NULL) +
   theme_minimal(base_size = 13) +
-  theme(legend.position = "none")
+  theme(legend.position = 'none')
 ```
 
 ## Feature importance : LASSO
@@ -281,14 +281,14 @@ pred_rf_f <- predict(final_rf, newdata = test)
 
 ```{r final-results}
 tibble(
-  model = c("LM", "LASSO", "Random Forest"),
+  model = c('LM', 'LASSO', 'Random Forest'),
   rmse  = c(rmse_fn(test$tf_blood_rate, pred_lm_f),
             rmse_fn(test$tf_blood_rate, pred_lasso_f),
             rmse_fn(test$tf_blood_rate, pred_rf_f)),
   r2    = c(r2_fn(test$tf_blood_rate, pred_lm_f),
             r2_fn(test$tf_blood_rate, pred_lasso_f),
             r2_fn(test$tf_blood_rate, pred_rf_f))
-) |>
+) %>%
   arrange(rmse)
 ```
 
@@ -327,10 +327,10 @@ df %>%
   ungroup() %>% 
   mutate(n_label = fct_reorder(n_label, abs_error, .fun = median)) %>%
   ggplot(aes(x = n_label, y = abs_error)) +
-  geom_boxplot(outlier.shape = 21, fill = "steelblue", alpha = 0.6) +
+  geom_boxplot(outlier.shape = 21, fill = 'steelblue', alpha = 0.6) +
   coord_flip() +
-  labs(title = "Absolute error by cancer type (test set)",
-       x = NULL, y = "Absolute error (log1p scale)") +
+  labs(title = 'Absolute error by cancer type (test set)',
+       x = NULL, y = 'Absolute error (log1p scale)') +
   theme_bw()
 ```
 
@@ -361,11 +361,11 @@ for(rep in 1:n_repeats){
     fold_train <- train[folds != i, ]
     cols_to_scale <- setdiff(
       names(fold_train),
-      c("tf_blood_rate", "alt_status")
+      c('tf_blood_rate', 'alt_status')
     )
     preproc <- preProcess(
       fold_train %>% select(all_of(cols_to_scale)),
-      method = c("center", "scale")
+      method = c('center', 'scale')
     )
     fold_train_s <- fold_train %>%
       mutate(
@@ -377,11 +377,11 @@ for(rep in 1:n_repeats){
     # PART 1: Presence
     m_presence_cv <- glm(
       I(tf_blood_rate > 0) ~ .,
-      family = binomial(link = "logit"),
+      family = binomial(link = 'logit'),
       data = fold_train_s
     )
     presence_coef_list[[idx]] <- tidy(m_presence_cv) %>%
-      filter(term != "(Intercept)") %>%
+      filter(term != '(Intercept)') %>%
       mutate(
         rep = rep,
         fold = i
@@ -391,11 +391,11 @@ for(rep in 1:n_repeats){
       filter(tf_blood_rate > 0)
     m_intensity_cv <- glm(
       tf_blood_rate ~ .,
-      family = Gamma(link = "log"),
+      family = Gamma(link = 'log'),
       data = df_positive_cv
     )
     intensity_coef_list[[idx]] <- tidy(m_intensity_cv) %>%
-      filter(term != "(Intercept)") %>%
+      filter(term != '(Intercept)') %>%
       mutate(
         rep = rep,
         fold = i
@@ -408,9 +408,9 @@ for(rep in 1:n_repeats){
 ```{r importance-two-models}
 importance_cv <- bind_rows(
   bind_rows(presence_coef_list) %>%
-    mutate(model_part = "Presence (P(TF>0))"),
+    mutate(model_part = 'Presence (P(TF>0))'),
   bind_rows(intensity_coef_list) %>%
-    mutate(model_part = "Intensity (E[TF|TF>0])")
+    mutate(model_part = 'Intensity (E[TF|TF>0])')
 ) %>%
   group_by(model_part, term) %>%
   summarise(
@@ -420,14 +420,14 @@ importance_cv <- bind_rows(
     freq_p05 = mean(p.value < 0.05, na.rm = TRUE),
     sign_stability =
       mean(sign(estimate) == sign(mean(estimate))),
-    .groups = "drop"
+    .groups = 'drop'
   ) %>%
   mutate(
     significance = case_when(
-      freq_p05 >= 0.9 ~ "***",
-      freq_p05 >= 0.7 ~ "**",
-      freq_p05 >= 0.5 ~ "*",
-      TRUE ~ "ns"
+      freq_p05 >= 0.9 ~ '***',
+      freq_p05 >= 0.7 ~ '**',
+      freq_p05 >= 0.5 ~ '*',
+      TRUE ~ 'ns'
     )
   )
 
@@ -444,7 +444,7 @@ importance_cv %>%
       xmax = coef_mean + coef_sd
     ),
     height = 0.2,
-    color = "grey30"
+    color = 'grey30'
   ) +
   geom_text(
     aes(label = significance),
@@ -454,17 +454,17 @@ importance_cv %>%
   ) +
   geom_vline(
     xintercept = 0,
-    linetype = "dashed",
-    color = "grey50"
+    linetype = 'dashed',
+    color = 'grey50'
   ) +
-  facet_wrap(~model_part, scales = "free_y") +
+  facet_wrap(~model_part, scales = 'free_y') +
   theme_minimal() +
   labs(
-    title = "Two-part model coefficient stability across CV folds",
+    title = 'Two-part model coefficient stability across CV folds',
     subtitle =
-      "***: significant in ≥90% folds; **: ≥70%; *: ≥50%",
-    x = "Mean coefficient across CV folds",
+      '***: significant in ≥90% folds; **: ≥70%; *: ≥50%',
+    x = 'Mean coefficient across CV folds',
     y = NULL
   ) + 
-  theme(legend.position = "none")
+  theme(legend.position = 'none')
 ```

@@ -79,7 +79,7 @@ Here we have to be careful: although the columns have the same name and the same
 With these consideration being made, we can now rename the columns and remove duplicates or ambiguities.
 ```{r column-rename}
 source(here('scripts', 'clean_columns.R'))
-tel_data <- clean_telomere_data(data)
+tel_data <- clean_drivers_data(data)
 colnames(tel_data)
 ```
 

@@ -48,7 +48,7 @@ clean_data_orig <- clean_data %>%
     telomere_insertion_rate = log1p(telomere_insertion_rate),
     alt_status = factor(
       alt_status,
-      levels = c("ALT-low", "ALT-high")
+      levels = c('ALT-low', 'ALT-high')
     )
   )
 
@@ -59,7 +59,7 @@ clean_data <- clean_data %>%
     telomere_insertion_rate = log1p(telomere_insertion_rate),
     alt_status = factor(
       alt_status,
-      levels = c("ALT-low", "ALT-high")
+      levels = c('ALT-low', 'ALT-high')
     )
   )
 ```
@@ -114,9 +114,9 @@ for (rep in 1:n_repeats){
     fold_test <- train[folds==i,]
     
     # Standardize the predictors
-    cols_to_scale <- setdiff(names(fold_train), c("tf_primary_rate", "alt_status"))
+    cols_to_scale <- setdiff(names(fold_train), c('tf_primary_rate', 'alt_status'))
     preproc <- preProcess(fold_train %>% select(all_of(cols_to_scale)),
-                           method = c("center", "scale"))
+                           method = c('center', 'scale'))
     fold_train_s <- fold_train %>%
       mutate(predict(preproc, fold_train %>% select(all_of(cols_to_scale))))
     fold_test_s  <- fold_test %>%
@@ -192,17 +192,17 @@ cv_summary
 ```
 
 ```{r cv-performance-plot}
-cv_results |>
-  pivot_longer(c(rmse, mae), names_to = "metric", values_to = "value") |>
-  mutate(model = fct_reorder(model, value, .fun = mean)) |>
+cv_results %>%
+  pivot_longer(c(rmse, mae), names_to = 'metric', values_to = 'value') %>%
+  mutate(model = fct_reorder(model, value, .fun = mean)) %>%
   ggplot(aes(x = model, y = value, fill = model)) +
   geom_boxplot(alpha = 0.7, outlier.shape = 21) +
-  facet_wrap(~metric, scales = "free_y",
-             labeller = labeller(metric = c(rmse = "RMSE", mae = "MAE"))) +
-  labs(title = "Metrics distribution per fold (5-fold)",
+  facet_wrap(~metric, scales = 'free_y',
+             labeller = labeller(metric = c(rmse = 'RMSE', mae = 'MAE'))) +
+  labs(title = 'Metrics distribution per fold (5-fold)',
        x = NULL, y = NULL) +
   theme_minimal(base_size = 13) +
-  theme(legend.position = "none")
+  theme(legend.position = 'none')
 ```
 
 ## Feature importance : LASSO
@@ -301,7 +301,7 @@ pred_rf_f <- predict(final_rf, newdata = test)
 ```{r shapr-rf-cv}
 clean_data_shap <- clean_data %>%
   # randomForest.unify() does not support categorical predictors.
-  mutate(alt_status = as.numeric(alt_status == "ALT-high"))
+  mutate(alt_status = as.numeric(alt_status == 'ALT-high'))
 
 k <- 5
 shap_list <- list()
@@ -332,9 +332,9 @@ for (i in 1:k) {
   )
 }
 
-shap_matrix <- bind_rows(lapply(shap_list, `[[`, "shap"))
-X_matrix    <- bind_rows(lapply(shap_list, `[[`, "X"))
-row_ids     <- unlist(lapply(shap_list, `[[`, "row_id"))
+shap_matrix <- bind_rows(lapply(shap_list, `[[`, 'shap'))
+X_matrix    <- bind_rows(lapply(shap_list, `[[`, 'X'))
+row_ids     <- unlist(lapply(shap_list, `[[`, 'row_id'))
 ord         <- order(row_ids)
 shap_matrix <- shap_matrix[ord, ]
 X_matrix    <- X_matrix[ord, ]
@@ -345,7 +345,7 @@ stopifnot(nrow(shap_matrix) == length(cancer_type_vector))
 # Build a single aligned metadata frame
 shap_meta <- tibble(
   cancer_group = factor(cancer_group_vector,
-                        levels = c("Non_Mesenchymal_origin", "Mesenchymal_origin")),
+                        levels = c('Non_Mesenchymal_origin', 'Mesenchymal_origin')),
   cancer_type  = fct_lump_n(factor(cancer_type_vector), n = 8),
   alt_status   = clean_data_shap$alt_status
 )
@@ -364,14 +364,14 @@ dep_by_group <- function(v) {
     feature_value = X_matrix[[v]],
     shap_value    = shap_matrix[[v]],
     cancer_group  = shap_meta$cancer_group
-  ) |>
+  ) %>%
     ggplot(aes(feature_value, shap_value)) +
     geom_point(aes(color = cancer_group, size = cancer_group,
                    alpha = cancer_group)) +
-    scale_color_manual(values = c("grey70", "firebrick")) +
+    scale_color_manual(values = c('grey70', 'firebrick')) +
     scale_size_manual(values = c(1.2, 2.2)) +
     scale_alpha_manual(values = c(0.4, 0.9)) +
-    labs(x = v, y = paste("SHAP value for", v)) +
+    labs(x = v, y = paste('SHAP value for', v)) +
     theme_bw()
 }
 
@@ -380,56 +380,56 @@ dep_by_cancer <- function(v) {
     feature_value = X_matrix[[v]],
     shap_value    = shap_matrix[[v]],
     cancer_type   = shap_meta$cancer_type
-  ) |>
+  ) %>%
     ggplot(aes(feature_value, shap_value, color = cancer_type)) +
     geom_point(alpha = 0.7, size = 1.5) +
-    labs(x = v, y = paste("SHAP value for", v), color = "Cancer type") +
+    labs(x = v, y = paste('SHAP value for', v), color = 'Cancer type') +
     theme_bw()
 }
 
-shap_by_group_summary <- shap_matrix |>
-  mutate(cancer_group = cancer_group_vector) |>
-  pivot_longer(-cancer_group, names_to = "feature", values_to = "shap") |>
-  group_by(feature, cancer_group) |>
+shap_by_group_summary <- shap_matrix %>%
+  mutate(cancer_group = cancer_group_vector) %>%
+  pivot_longer(-cancer_group, names_to = 'feature', values_to = 'shap') %>%
+  group_by(feature, cancer_group) %>%
   summarise(mean_abs_shap = mean(abs(shap)),
-            n = n(), .groups = "drop") |>
-  pivot_wider(names_from = cancer_group, values_from = c(mean_abs_shap, n)) |>
-  mutate(diff = mean_abs_shap_Mesenchymal_origin - mean_abs_shap_Non_Mesenchymal_origin) |>
+            n = n(), .groups = 'drop') %>%
+  pivot_wider(names_from = cancer_group, values_from = c(mean_abs_shap, n)) %>%
+  mutate(diff = mean_abs_shap_Mesenchymal_origin - mean_abs_shap_Non_Mesenchymal_origin) %>%
   arrange(desc(abs(diff)))
 
 # Plots
 
-sv_importance(sv_oof, kind = "beeswarm", bee_adjust = 5, alpha = 0.8) + theme_bw()
-sv_dependence(sv_oof, v = "telomere_content_log2", color_var = "alt_status") + theme_bw()
+sv_importance(sv_oof, kind = 'beeswarm', bee_adjust = 5, alpha = 0.8) + theme_bw()
+sv_dependence(sv_oof, v = 'telomere_content_log2', color_var = 'alt_status') + theme_bw()
 dep_by_cancer('telomere_content_log2')
 dep_by_group('telomere_content_log2')
 
-sv_dependence(sv_oof, v = "telomere_insertion_rate",         color_var = "alt_status") + theme_bw()
+sv_dependence(sv_oof, v = 'telomere_insertion_rate',         color_var = 'alt_status') + theme_bw()
 dep_by_cancer('telomere_insertion_rate')
 dep_by_group('telomere_insertion_rate')
 
-sv_dependence(sv_oof, v = "tf_blood_rate",         color_var = "alt_status") + theme_bw()
+sv_dependence(sv_oof, v = 'tf_blood_rate',         color_var = 'alt_status') + theme_bw()
 dep_by_cancer('tf_blood_rate')
 dep_by_group('tf_blood_rate')
 
-sv_dependence(sv_oof, v = "alt_status",            color_var = "tf_blood_rate") + theme_bw()
+sv_dependence(sv_oof, v = 'alt_status',            color_var = 'tf_blood_rate') + theme_bw()
 dep_by_group('alt_status')
 
 singleton_vars <- c(
-    "ATAGGG_singleton_dist",
-    "CTAGGG_singleton_dist",
-    "GTAGGG_singleton_dist",
-    "TAAGGG_singleton_dist",
-    "TCAGGG_singleton_dist",
-    "TGAGGG_singleton_dist",
-    "TTCGGG_singleton_dist",
-    "TTGGGG_singleton_dist",
-    "TTTGGG_singleton_dist"
+    'ATAGGG_singleton_dist',
+    'CTAGGG_singleton_dist',
+    'GTAGGG_singleton_dist',
+    'TAAGGG_singleton_dist',
+    'TCAGGG_singleton_dist',
+    'TGAGGG_singleton_dist',
+    'TTCGGG_singleton_dist',
+    'TTGGGG_singleton_dist',
+    'TTTGGG_singleton_dist'
   )
 singleton_plots_alt <- purrr::map(
   singleton_vars,
   \(v) {
-    sv_dependence(sv_oof, v = v, color_var = "alt_status") +
+    sv_dependence(sv_oof, v = v, color_var = 'alt_status') +
       theme_bw() +
       theme(
         plot.title = element_text(size = 10),
@@ -438,8 +438,8 @@ singleton_plots_alt <- purrr::map(
       )
   }
 )
-wrap_plots(singleton_plots_alt, ncol = 3, guides = "collect") +
-  plot_annotation(title = "***GGG singleton SHAP dependence")
+wrap_plots(singleton_plots_alt, ncol = 3, guides = 'collect') +
+  plot_annotation(title = '***GGG singleton SHAP dependence')
 
 singleton_plots_cancer <- purrr::map(
   singleton_vars,
@@ -453,8 +453,8 @@ singleton_plots_cancer <- purrr::map(
       )
   }
 )
-wrap_plots(singleton_plots_cancer, ncol = 3, guides = "collect") +
-  plot_annotation(title = "***GGG singleton SHAP dependence")
+wrap_plots(singleton_plots_cancer, ncol = 3, guides = 'collect') +
+  plot_annotation(title = '***GGG singleton SHAP dependence')
 
 singleton_plots_cancer <- purrr::map(
   singleton_vars,
@@ -468,23 +468,23 @@ singleton_plots_cancer <- purrr::map(
       )
   }
 )
-wrap_plots(singleton_plots_cancer, ncol = 3, guides = "collect") +
-  plot_annotation(title = "***GGG singleton SHAP dependence")
+wrap_plots(singleton_plots_cancer, ncol = 3, guides = 'collect') +
+  plot_annotation(title = '***GGG singleton SHAP dependence')
 
 
 alt_high_idx <- which(clean_data_shap$alt_status == 1)
 alt_low_idx  <- which(clean_data_shap$alt_status == 0)
 
 sv_waterfall(sv_oof, row_id = alt_high_idx) +
-  ggtitle("Average SHAP - ALT-high")
+  ggtitle('Average SHAP - ALT-high')
 
 sv_waterfall(sv_oof, row_id = alt_low_idx) +
-  ggtitle("Average SHAP - ALT-low")
+  ggtitle('Average SHAP - ALT-low')
 ```
 
 ```{r final-results}
 tibble(
-  model = c("LM", "LASSO", "Random Forest"),
+  model = c('LM', 'LASSO', 'Random Forest'),
   rmse  = c(rmse_fn(test$tf_primary_rate, pred_lm_f),
             rmse_fn(test$tf_primary_rate, pred_lasso_f),
             rmse_fn(test$tf_primary_rate, pred_rf_f)),
@@ -492,11 +492,11 @@ tibble(
             mae_fn(test$tf_primary_rate, pred_lasso_f),
             mae_fn(test$tf_primary_rate, pred_rf_f)),
   Spearman = c(
-    cor(test$tf_primary_rate, pred_lm_f,    method = "spearman"),
-    cor(test$tf_primary_rate, pred_lasso_f, method = "spearman"),
-    cor(test$tf_primary_rate, pred_rf_f,    method = "spearman")
+    cor(test$tf_primary_rate, pred_lm_f,    method = 'spearman'),
+    cor(test$tf_primary_rate, pred_lasso_f, method = 'spearman'),
+    cor(test$tf_primary_rate, pred_rf_f,    method = 'spearman')
   )
-) |>
+) %>%
   arrange(rmse)
 ```
 
@@ -535,10 +535,10 @@ df %>%
   ungroup() %>% 
   mutate(n_label = fct_reorder(n_label, abs_error, .fun = median)) %>%
   ggplot(aes(x = n_label, y = abs_error)) +
-  geom_boxplot(outlier.shape = 21, fill = "steelblue", alpha = 0.6) +
+  geom_boxplot(outlier.shape = 21, fill = 'steelblue', alpha = 0.6) +
   coord_flip() +
-  labs(title = "Absolute error by cancer type (test set)",
-       x = NULL, y = "Absolute error (original scale)") +
+  labs(title = 'Absolute error by cancer type (test set)',
+       x = NULL, y = 'Absolute error (original scale)') +
   theme_bw()
 ```
 
@@ -572,11 +572,11 @@ for(rep in 1:n_repeats){
     fold_test <- train[folds == i,]
     cols_to_scale <- setdiff(
       names(fold_train),
-      c("tf_primary_rate", "alt_status")
+      c('tf_primary_rate', 'alt_status')
     )
     preproc <- preProcess(
       fold_train %>% select(all_of(cols_to_scale)),
-      method = c("center", "scale")
+      method = c('center', 'scale')
     )
     fold_train_s <- fold_train %>%
       mutate(
@@ -588,12 +588,12 @@ for(rep in 1:n_repeats){
     # PART 1: Presence
     m_presence_cv <- glm(
       I(tf_primary_rate > 0) ~ .,
-      family = binomial(link = "logit"),
+      family = binomial(link = 'logit'),
       data = fold_train_s
       )
     # store coefficients
     presence_coef_list[[idx]] <- tidy(m_presence_cv) %>%
-      filter(term != "(Intercept)") %>%
+      filter(term != '(Intercept)') %>%
       mutate(
         rep = rep,
         fold = i
@@ -609,7 +609,7 @@ for(rep in 1:n_repeats){
     pred_presence_cv <- predict(
       m_presence_cv,
       newdata = fold_test_s,
-      type = "response"
+      type = 'response'
       )
     presence_results <- bind_rows(
       presence_results,
@@ -626,11 +626,11 @@ for(rep in 1:n_repeats){
       filter(tf_primary_rate > 0)
     m_intensity_cv <- glm(
       tf_primary_rate ~ .,
-      family = Gamma(link = "log"),
+      family = Gamma(link = 'log'),
       data = df_positive_cv
       )
     intensity_coef_list[[idx]] <- tidy(m_intensity_cv) %>%
-      filter(term != "(Intercept)") %>%
+      filter(term != '(Intercept)') %>%
       mutate(
         rep = rep,
         fold = i
@@ -645,9 +645,9 @@ for(rep in 1:n_repeats){
 ```{r importance-two-models}
 importance_cv <- bind_rows(
   bind_rows(presence_coef_list) %>%
-    mutate(model_part = "Presence (P(TF>0))"),
+    mutate(model_part = 'Presence (P(TF>0))'),
   bind_rows(intensity_coef_list) %>%
-    mutate(model_part = "Intensity (E[TF|TF>0])")
+    mutate(model_part = 'Intensity (E[TF|TF>0])')
 ) %>%
   group_by(model_part, term) %>%
   summarise(
@@ -657,14 +657,14 @@ importance_cv <- bind_rows(
     freq_p05 = mean(p.value < 0.05, na.rm = TRUE),
     sign_stability =
       mean(sign(estimate) == sign(mean(estimate))),
-    .groups = "drop"
+    .groups = 'drop'
   ) %>%
   mutate(
     significance = case_when(
-      freq_p05 >= 0.9 ~ "***",
-      freq_p05 >= 0.7 ~ "**",
-      freq_p05 >= 0.5 ~ "*",
-      TRUE ~ "ns"
+      freq_p05 >= 0.9 ~ '***',
+      freq_p05 >= 0.7 ~ '**',
+      freq_p05 >= 0.5 ~ '*',
+      TRUE ~ 'ns'
     )
   )
 
@@ -680,7 +680,7 @@ importance_cv %>%
       xmax = coef_mean + coef_sd
     ),
     height = 0.2,
-    color = "grey30"
+    color = 'grey30'
   ) +
   geom_text(
     aes(label = significance),
@@ -690,19 +690,19 @@ importance_cv %>%
   ) +
   geom_vline(
     xintercept = 0,
-    linetype = "dashed",
-    color = "grey50"
+    linetype = 'dashed',
+    color = 'grey50'
   ) +
-  facet_wrap(~model_part, scales = "free_y") +
+  facet_wrap(~model_part, scales = 'free_y') +
   theme_minimal() +
   labs(
-    title = "Two-part model coefficient stability across CV folds",
+    title = 'Two-part model coefficient stability across CV folds',
     subtitle =
-      "***: significant in ≥90% folds; **: ≥70%; *: ≥50%",
-    x = "Mean coefficient across CV folds",
+      '***: significant in ≥90% folds; **: ≥70%; *: ≥50%',
+    x = 'Mean coefficient across CV folds',
     y = NULL
   ) + 
-  theme(legend.position = "none")
+  theme(legend.position = 'none')
 ```
 
 ## Regression on test set
@@ -711,11 +711,11 @@ Here we do regression using the two-part model. We preprocess the training and t
 
 ```{r two-part model regression}
 # Preprocessing on training set
-cols_to_scale_orig <- setdiff(names(train_orig), c("tf_primary_rate", "alt_status"))
+cols_to_scale_orig <- setdiff(names(train_orig), c('tf_primary_rate', 'alt_status'))
 
 preproc_orig <- preProcess(
   train_orig %>% select(all_of(cols_to_scale_orig)),
-  method = c("center", "scale")
+  method = c('center', 'scale')
 )
 
 train_orig_s <- train_orig %>%
@@ -727,20 +727,20 @@ test_orig_s <- test_orig %>%
 # Fit final models on the whole training set
 m_presence_final <- glm(
   I(tf_primary_rate > 0) ~ .,
-  family = binomial(link = "logit"),
+  family = binomial(link = 'logit'),
   data = train_orig_s
 )
 
 m_intensity_final <- glm(
   tf_primary_rate ~ .,
-  family = Gamma(link = "log"),
+  family = Gamma(link = 'log'),
   data = train_orig_s %>% filter(tf_primary_rate > 0),
   control = glm.control(maxit = 200)
 )
 
 # Prediction on test set
-pred_presence  <- predict(m_presence_final, newdata = test_orig_s, type = "response")
-pred_intensity <- predict(m_intensity_final, newdata = test_orig_s, type = "response")
+pred_presence  <- predict(m_presence_final, newdata = test_orig_s, type = 'response')
+pred_intensity <- predict(m_intensity_final, newdata = test_orig_s, type = 'response')
 pred_combined  <- pred_presence * pred_intensity    # formula of the two-part model
 
 true_orig <- test_orig$tf_primary_rate
@@ -755,7 +755,7 @@ pred_lasso_orig <- exp(pred_lasso_f) * smear_lasso - 1
 pred_rf_orig    <- exp(pred_rf_f)    * smear_rf - 1
 
 tibble(
-  model = c("LM", "LASSO", "Random Forest", "Two-part"),
+  model = c('LM', 'LASSO', 'Random Forest', 'Two-part'),
   RMSE = c(
     rmse_fn(true_orig, pred_lm_orig),
     rmse_fn(true_orig, pred_lasso_orig),
@@ -769,10 +769,10 @@ tibble(
     mean(abs(true_orig - pred_combined))
   ),
   Spearman = c(
-    cor(true_orig, pred_lm_orig,    method = "spearman"),
-    cor(true_orig, pred_lasso_orig, method = "spearman"),
-    cor(true_orig, pred_rf_orig,    method = "spearman"),
-    cor(true_orig, pred_combined,   method = "spearman")
+    cor(true_orig, pred_lm_orig,    method = 'spearman'),
+    cor(true_orig, pred_lasso_orig, method = 'spearman'),
+    cor(true_orig, pred_rf_orig,    method = 'spearman'),
+    cor(true_orig, pred_combined,   method = 'spearman')
   )
 ) %>% arrange(RMSE)
 ```
@@ -785,7 +785,7 @@ presence_auc <- presence_results %>%
   group_by(rep, fold) %>%
   summarise(
     auc = as.numeric(pROC::roc(truth, prob, quiet = TRUE)$auc),
-    .groups = "drop"
+    .groups = 'drop'
   )
 presence_auc %>%
   summarise(
@@ -793,14 +793,14 @@ presence_auc %>%
     sd_auc = sd(auc, na.rm = TRUE)
   )
 presence_auc %>%
-  ggplot(aes(x = "Presence model", y = auc)) +
-  geom_boxplot(fill = "steelblue", alpha = 0.7, width = 0.4) +
+  ggplot(aes(x = 'Presence model', y = auc)) +
+  geom_boxplot(fill = 'steelblue', alpha = 0.7, width = 0.4) +
   geom_jitter(width = 0.08, alpha = 0.6) +
   labs(
-    title = "Presence model performance across CV folds",
-    subtitle = "Logistic part of the two-part model",
+    title = 'Presence model performance across CV folds',
+    subtitle = 'Logistic part of the two-part model',
     x = NULL,
-    y = "ROC AUC"
+    y = 'ROC AUC'
   ) +
   theme_bw()
 
@@ -809,7 +809,7 @@ pred_class <- if_else(pred_presence > 0.5, 1, 0)
 confusionMatrix(
   factor(pred_class),
   factor(as.numeric(test_orig_s$tf_primary_rate > 0)),
-  positive = "1"
+  positive = '1'
 )
 
 ```
@@ -819,30 +819,30 @@ confusionMatrix(
 ```{r intensity-model-performance}
 test_pos_idx <- test_orig_s$tf_primary_rate > 0
 
-cat("Intensity component (evaluated on true positives only, n =", 
+cat('Intensity component (evaluated on true positives only, n =', 
     sum(test_pos_idx), ")\n")
-cat("MAE:     ", round(mae_fn(true_orig[test_pos_idx], 
+cat('MAE:     ', round(mae_fn(true_orig[test_pos_idx], 
                                pred_intensity[test_pos_idx]), 4), "\n")
-cat("RMSE:    ", round(rmse_fn(true_orig[test_pos_idx], 
+cat('RMSE:    ', round(rmse_fn(true_orig[test_pos_idx], 
                                 pred_intensity[test_pos_idx]), 4), "\n")
-cat("Spearman:", round(cor(true_orig[test_pos_idx], 
+cat('Spearman:', round(cor(true_orig[test_pos_idx], 
                             pred_intensity[test_pos_idx], 
-                            method = "spearman"), 4), "\n")
+                            method = 'spearman'), 4), "\n")
 
 tibble(
   true = true_orig[test_pos_idx],
   pred = pred_intensity[test_pos_idx]
 ) %>%
   ggplot(aes(x = true, y = pred)) +
-  geom_point(alpha = 0.5, color = "steelblue") +
+  geom_point(alpha = 0.5, color = 'steelblue') +
   geom_abline(slope = 1, intercept = 0, 
-              linetype = "dashed", color = "grey40") +
+              linetype = 'dashed', color = 'grey40') +
   labs(
-    title = "Intensity component: predicted vs observed",
-    subtitle = paste0("True positives only (n = ", sum(test_pos_idx), 
-                      ") — original scale"),
-    x = "Observed tf_primary_rate",
-    y = "Predicted (Gamma GLM)"
+    title = 'Intensity component: predicted vs observed',
+    subtitle = paste0('True positives only (n = ', sum(test_pos_idx), 
+                      ') — original scale'),
+    x = 'Observed tf_primary_rate',
+    y = 'Predicted (Gamma GLM)'
   ) +
   theme_bw()
 ```

@@ -28,21 +28,21 @@ library(pROC)
 library(glmnet)
 library(here)
 
-dir.create(here("outputs", "blood_tf"), showWarnings = FALSE, recursive = TRUE)
+dir.create(here('outputs', 'blood_tf'), showWarnings = FALSE, recursive = TRUE)
 
-data <- read_xlsx(here("data", "processed", "PCAWG_primary.xlsx"))
+data <- read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 
-tvr_cols <- grep("_singleton_dist$", names(data), value = TRUE)
+tvr_cols <- grep('_singleton_dist$', names(data), value = TRUE)
 
 # Full tumor feature set (same as notebook 02) + the candidate blood feature
-full_feats <- c("tf_primary_rate", "telomere_insertion_rate",
-                "telomere_content_log2", "TERT_FPKM", tvr_cols)
+full_feats <- c('tf_primary_rate', 'telomere_insertion_rate',
+                'telomere_content_log2', 'TERT_FPKM', tvr_cols)
 
 model_data <- data %>%
-  filter(alt_status %in% c("ALT-low", "ALT-high")) %>%
+  filter(alt_status %in% c('ALT-low', 'ALT-high')) %>%
   select(alt_status, tf_blood_rate, all_of(full_feats)) %>%
   filter(complete.cases(.)) %>%
-  mutate(alt_status = factor(alt_status, levels = c("ALT-low", "ALT-high")))
+  mutate(alt_status = factor(alt_status, levels = c('ALT-low', 'ALT-high')))
 
 cat(sprintf("Cohort: %d patients, %d tumor features (+ blood TF)\n",
             nrow(model_data), length(full_feats)))
@@ -59,12 +59,12 @@ p_uni <- ggplot(model_data, aes(alt_status, tf_blood_rate, fill = alt_status)) +
   geom_jitter(width = 0.15, alpha = 0.3, size = 1) +
   scale_y_log10() +
   theme_bw() +
-  labs(x = NULL, y = "Blood TF rate (log10)",
-       title = "Blood telomere fusion rate by ALT status") +
-  theme(legend.position = "none")
+  labs(x = NULL, y = 'Blood TF rate (log10)',
+       title = 'Blood telomere fusion rate by ALT status') +
+  theme(legend.position = 'none')
 
 print(p_uni)
-ggsave(here("outputs", "blood_tf", "blood_tf_by_alt_status.pdf"),
+ggsave(here('outputs', 'blood_tf', 'blood_tf_by_alt_status.pdf'),
        p_uni, width = 5, height = 4)
 
 w <- wilcox.test(tf_blood_rate ~ alt_status, data = model_data)
@@ -72,12 +72,12 @@ model_data %>%
   group_by(alt_status) %>%
   summarise(n = n(),
             median = median(tf_blood_rate),
-            mean = mean(tf_blood_rate), .groups = "drop")
-cat("Wilcoxon rank-sum p =", signif(w$p.value, 3), "\n")
+            mean = mean(tf_blood_rate), .groups = 'drop')
+cat('Wilcoxon rank-sum p =', signif(w$p.value, 3), "\n")
 
-cat("Spearman cor(tumor TF, blood TF) =",
+cat('Spearman cor(tumor TF, blood TF) =',
     round(cor(model_data$tf_primary_rate, model_data$tf_blood_rate,
-              method = "spearman"), 3), "\n")
+              method = 'spearman'), 3), "\n")
 ```
 
 The two distributions are essentially overlapping — if anything blood TF is marginally *lower* in ALT-high tumors — and the rank-sum test is non-significant. Blood TF is not a univariate discriminator of ALT status.
@@ -90,20 +90,20 @@ We compare two models — `full` (tumor features only) and `full + blood TF` —
 # caret needs syntactically valid factor labels for classProbs
 cv_data <- model_data %>%
   mutate(alt_status = factor(alt_status,
-                             levels = c("ALT-low", "ALT-high"),
-                             labels = c("ALT_low", "ALT_high")))
+                             levels = c('ALT-low', 'ALT-high'),
+                             labels = c('ALT_low', 'ALT_high')))
 
 set.seed(21)
 folds <- createMultiFolds(cv_data$alt_status, k = 5, times = 5)
 
 ctrl <- trainControl(
-  method          = "repeatedcv",
+  method          = 'repeatedcv',
   number          = 5,
   repeats         = 5,
   index           = folds,
   classProbs      = TRUE,
   summaryFunction = twoClassSummary,
-  savePredictions = "final"
+  savePredictions = 'final'
 )
 
 feature_sets <- list(
@@ -121,17 +121,17 @@ set.seed(21)
 for (fs in names(feature_sets)) {
   df <- feature_sets[[fs]]
 
-  log_model <- train(alt_status ~ ., data = df, method = "glm",
-                     family = "binomial", metric = "ROC", trControl = ctrl)
-  rf_model  <- train(alt_status ~ ., data = df, method = "rf",
-                     metric = "ROC", trControl = ctrl)
+  log_model <- train(alt_status ~ ., data = df, method = 'glm',
+                     family = 'binomial', metric = 'ROC', trControl = ctrl)
+  rf_model  <- train(alt_status ~ ., data = df, method = 'rf',
+                     metric = 'ROC', trControl = ctrl)
 
-  for (nm in c("LogReg", "RF")) {
-    m  <- if (nm == "LogReg") log_model else rf_model
+  for (nm in c('LogReg', 'RF')) {
+    m  <- if (nm == 'LogReg') log_model else rf_model
     rs <- m$resample
     rs$feature_set <- fs
     rs$model       <- nm
-    resamples_list[[paste(fs, nm, sep = "_")]] <- rs
+    resamples_list[[paste(fs, nm, sep = '_')]] <- rs
   }
 }
 
@@ -141,13 +141,13 @@ resamples_df <- bind_rows(resamples_list)
 ```{r paired-delta}
 # Reference: per-resample AUC of the full model, by model type
 full_ref <- resamples_df %>%
-  filter(feature_set == "full") %>%
+  filter(feature_set == 'full') %>%
   select(Resample, model, ROC_full = ROC)
 
 # Paired ΔAUC = AUC[full + blood] − AUC[full]; positive => blood TF helps
 delta_df <- resamples_df %>%
-  filter(feature_set == "full_blood") %>%
-  left_join(full_ref, by = c("Resample", "model")) %>%
+  filter(feature_set == 'full_blood') %>%
+  left_join(full_ref, by = c('Resample', 'model')) %>%
   mutate(delta_AUC = ROC - ROC_full)
 
 blood_stat <- delta_df %>%
@@ -162,7 +162,7 @@ blood_stat <- delta_df %>%
     ci_high    = mean_delta + qt(0.975, df = n - 1) * sd_delta / sqrt(n),
     p_wilcoxon = wilcox.test(delta_AUC[!is.na(delta_AUC)],
                              mu = 0, exact = FALSE)$p.value,
-    .groups    = "drop"
+    .groups    = 'drop'
   )
 
 blood_stat %>%
@@ -171,24 +171,24 @@ blood_stat %>%
          p_wilcoxon = signif(p_wilcoxon, 3)) %>%
   print(n = Inf)
 
-write_csv(blood_stat, here("outputs", "blood_tf", "blood_tf_delta_auc.csv"))
+write_csv(blood_stat, here('outputs', 'blood_tf', 'blood_tf_delta_auc.csv'))
 ```
 
 ```{r delta-plot, fig.width=7, fig.height=4}
 p_delta <- ggplot(delta_df, aes(x = model, y = delta_AUC, fill = model)) +
-  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+  geom_hline(yintercept = 0, linetype = 'dashed', colour = 'grey40') +
   geom_boxplot(outlier.size = 0.5, alpha = 0.8, show.legend = FALSE) +
   geom_jitter(width = 0.12, alpha = 0.3, size = 0.8, show.legend = FALSE) +
   coord_flip() +
   labs(
-    title    = "Per-resample ΔAUC from adding blood TF",
-    subtitle = "Positive = blood TF improves AUC; 25 resamples (5-fold × 5-repeat)",
-    x = NULL, y = "ΔAUC (full + blood TF  −  full)"
+    title    = 'Per-resample ΔAUC from adding blood TF',
+    subtitle = 'Positive = blood TF improves AUC; 25 resamples (5-fold × 5-repeat)',
+    x = NULL, y = 'ΔAUC (full + blood TF  −  full)'
   ) +
   theme_bw(base_size = 11)
 
 print(p_delta)
-ggsave(here("outputs", "blood_tf", "blood_tf_delta_auc.pdf"),
+ggsave(here('outputs', 'blood_tf', 'blood_tf_delta_auc.pdf'),
        p_delta, width = 7, height = 4)
 ```
 
@@ -203,25 +203,25 @@ X <- scale(as.matrix(model_data %>% select(tf_blood_rate, all_of(full_feats))))
 y <- model_data$alt_status
 
 set.seed(21)
-cv_fit <- cv.glmnet(X, y, alpha = 1, family = "binomial",
+cv_fit <- cv.glmnet(X, y, alpha = 1, family = 'binomial',
                     standardize = FALSE, nfolds = 10)
 
-coef_1se <- coef(cv_fit, s = "lambda.1se")
-coef_min <- coef(cv_fit, s = "lambda.min")
+coef_1se <- coef(cv_fit, s = 'lambda.1se')
+coef_min <- coef(cv_fit, s = 'lambda.min')
 
 tibble(
   feature    = rownames(coef_1se)[-1],
   lambda_min = as.numeric(coef_min)[-1],
   lambda_1se = as.numeric(coef_1se)[-1]
 ) %>%
-  mutate(feature = gsub("_singleton_dist", "", feature)) %>%
+  mutate(feature = gsub('_singleton_dist', '', feature)) %>%
   arrange(desc(abs(lambda_1se))) %>%
   print(n = Inf)
 
 cat("\nblood TF coefficient (lambda.1se):",
-    signif(coef_1se["tf_blood_rate", 1], 3), "\n")
-cat("blood TF coefficient (lambda.min):",
-    signif(coef_min["tf_blood_rate", 1], 3), "\n")
+    signif(coef_1se['tf_blood_rate', 1], 3), "\n")
+cat('blood TF coefficient (lambda.min):',
+    signif(coef_min['tf_blood_rate', 1], 3), "\n")
 ```
 
 # Conclusion

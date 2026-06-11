@@ -484,8 +484,8 @@ knitr::kable(btf_coefs,
 
 # Summary
 
-- The seven gene columns are highly cancer-type specific, making naive inclusion confounded.
-- Only `ATRX_DAXX_trunc`, `TERT_mod`, `MEN1`, `KRAS`, and `VHL` reach the n≥20 prevalence threshold for stable estimation; `TSC2` and `MET` are excluded.
-- After adjusting for `cancer_group` and the stricter `cancer_type` random effect, the LRT and joint-model tables above identify which genes carry signal *independent* of cancer composition. Those are the defensible candidates to include in downstream ALT classifiers and TF regression models.
-- The stratified analysis indicates within which subset (mesenchymal vs non-mesenchymal) each effect is detectable, guiding biologically grounded interpretation.
-- The sensitivity analysis (NA → FALSE) confirms whether the conclusions are robust to the MNAR missingness in the 139 patients without gene annotation.
+-   The seven gene columns are highly cancer-type specific, making naive inclusion confounded.
+-   Only `ATRX_DAXX_trunc`, `TERT_mod`, `MEN1`, `KRAS`, and `VHL` reach the n≥20 prevalence threshold for stable estimation; `TSC2` and `MET` are excluded.
+-   After adjusting for `cancer_group` and the stricter `cancer_type` random effect, the LRT and joint-model tables above identify which genes carry signal *independent* of cancer composition. Those are the defensible candidates to include in downstream ALT classifiers and TF regression models.
+-   The stratified analysis indicates within which subset (mesenchymal vs non-mesenchymal) each effect is detectable, guiding biologically grounded interpretation.
+-   The sensitivity analysis (NA → FALSE) confirms whether the conclusions are robust to the MNAR missingness in the 139 patients without gene annotation.

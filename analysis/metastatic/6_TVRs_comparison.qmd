@@ -24,42 +24,57 @@ library(knitr)
 met_intrachrom <- read_xlsx(here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
 met_mesenchymal <- read_xlsx(here('data', 'processed', 'metastatic_red_edit_mesenchymal.xlsx'))
 primary <- read_xlsx(here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
+
+# Shared mesenchymal-vs-non colours, named for BOTH the primary cancer_group
+# levels ('*_origin') and the metastatic tumor_origin levels, so the same vectors
+# are reused across every chunk below.
+mes_colors <- c(
+  'Non_Mesenchymal_origin' = 'grey60', 'Mesenchymal_origin' = 'firebrick',
+  'Non_mesenchymal'        = 'grey60', 'Mesenchymal'        = 'firebrick'
+)
+mes_colors_dark <- c(
+  'Non_Mesenchymal_origin' = 'grey40', 'Mesenchymal_origin' = 'firebrick4',
+  'Non_mesenchymal'        = 'grey40', 'Mesenchymal'        = 'firebrick4'
+)
 ```
 
 # TVR singleton distance by primary tumor group (primary)
 
 ```{r tvr-singleton-dist-primary, fig.width = 14, fig.height = 11}
 data_prim <- primary %>%
-  select(donor_id, ends_with("_singleton_dist"), cancer_type, tf_primary_rate, tf_blood_rate) %>%
-  filter(complete.cases(.)) %>%
+  select(donor_id, ends_with('_singleton_dist'), cancer_type) %>%
+  filter(
+    !is.na(cancer_type),
+    if_any(ends_with('_singleton_dist'), ~ !is.na(.))
+  ) %>%
   mutate(
     tumor_group = case_when(
-      str_detect(cancer_type, regex("melanoma", ignore_case = TRUE)) ~ "Melanoma",
-      str_detect(cancer_type, regex("soft.?tissue|bone|sarc", ignore_case = TRUE)) ~ "Sarcoma",
-      str_detect(cancer_type, regex("adenoca|SCC|HCC|RCC|TCC|DCIS|lobular|biliary|eso|cervix|bladder|colon|rect|uterus|breast|lung|panc|prost|stomach|thyroid|ovary|head|kidney|liver", ignore_case = TRUE)) ~ "Carcinoma",
-      TRUE ~ "Other"
+      str_detect(cancer_type, regex('melanoma', ignore_case = TRUE)) ~ 'Melanoma',
+      str_detect(cancer_type, regex('soft.?tissue|bone|sarc', ignore_case = TRUE)) ~ 'Sarcoma',
+      str_detect(cancer_type, regex('adenoca|SCC|HCC|RCC|TCC|DCIS|lobular|biliary|eso|cervix|bladder|colon|rect|uterus|breast|lung|panc|prost|stomach|thyroid|ovary|head|kidney|liver', ignore_case = TRUE)) ~ 'Carcinoma',
+      TRUE ~ 'Other'
     ),
-    tumor_group = factor(tumor_group, levels = c("Carcinoma", "Melanoma", "Sarcoma", "Other"))
+    tumor_group = factor(tumor_group, levels = c('Carcinoma', 'Melanoma', 'Sarcoma', 'Other'))
   )
 
 motif_long_prim <- data_prim %>%
   pivot_longer(
-    cols = ends_with("_singleton_dist"),
-    names_to = "motif",
-    values_to = "singleton_dist"
+    cols = ends_with('_singleton_dist'),
+    names_to = 'motif',
+    values_to = 'singleton_dist'
   ) %>%
-  mutate(motif = str_remove(motif, "_singleton_dist"))
+  mutate(motif = str_remove(motif, '_singleton_dist'))
 
 group_labels_prim <- data_prim %>%
   count(tumor_group) %>%
-  mutate(label = paste0(tumor_group, " (n=", n, ")")) %>%
+  mutate(label = paste0(tumor_group, ' (n=', n, ')')) %>%
   { setNames(.$label, .$tumor_group) }
 
 kw_tests_prim <- motif_long_prim %>%
   group_by(motif) %>%
   kruskal_test(singleton_dist ~ tumor_group) %>%
-  adjust_pvalue(method = "BH") %>%
-  mutate(label = paste0("KW p=", signif(p.adj, 2)))
+  adjust_pvalue(method = 'BH') %>%
+  mutate(label = paste0('KW p=', signif(p.adj, 2)))
 
 kw_sig_motifs_prim <- kw_tests_prim %>%
   filter(p.adj < 0.05) %>%
@@ -68,9 +83,9 @@ kw_sig_motifs_prim <- kw_tests_prim %>%
 dunn_sig_prim <- motif_long_prim %>%
   filter(motif %in% kw_sig_motifs_prim) %>%
   group_by(motif) %>%
-  dunn_test(singleton_dist ~ tumor_group, p.adjust.method = "BH") %>%
-  filter(p.adj.signif != "ns") %>%
-  add_xy_position(x = "tumor_group", scales = "free", step.increase = 0.12)
+  dunn_test(singleton_dist ~ tumor_group, p.adjust.method = 'BH') %>%
+  filter(p.adj.signif != 'ns') %>%
+  add_xy_position(x = 'tumor_group', scales = 'free', step.increase = 0.12)
 
 ggplot(motif_long_prim, aes(tumor_group, singleton_dist, fill = tumor_group)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.65, width = 0.65) +
@@ -83,15 +98,15 @@ ggplot(motif_long_prim, aes(tumor_group, singleton_dist, fill = tumor_group)) +
   ) +
   stat_summary(
     fun = median,
-    geom = "point",
+    geom = 'point',
     shape = 23,
     size = 2.2,
-    fill = "white",
-    color = "black"
+    fill = 'white',
+    color = 'black'
   ) +
   stat_pvalue_manual(
     dunn_sig_prim,
-    label = "p.adj.signif",
+    label = 'p.adj.signif',
     tip.length = 0.01,
     inherit.aes = FALSE,
     hide.ns = TRUE
@@ -103,23 +118,23 @@ ggplot(motif_long_prim, aes(tumor_group, singleton_dist, fill = tumor_group)) +
     hjust = 1.05,
     vjust = 1.4,
     size = 2.6,
-    fontface = "italic",
-    color = "grey30"
+    fontface = 'italic',
+    color = 'grey30'
   ) +
-  facet_wrap(~ motif, scales = "free_y", ncol = 3) +
-  scale_fill_brewer(palette = "Set2", labels = group_labels_prim) +
-  scale_color_brewer(palette = "Set2") +
+  facet_wrap(~ motif, scales = 'free_y', ncol = 3) +
+  scale_fill_brewer(palette = 'Set2', labels = group_labels_prim) +
+  scale_color_brewer(palette = 'Set2') +
   labs(
     x = NULL,
-    y = "Singleton distance",
-    fill = "Tumor group",
-    title = "TVR singleton distance distributions by tumor group (primary)"
+    y = 'Singleton distance',
+    fill = 'Tumor group',
+    title = 'TVR singleton distance distributions by tumor group (primary)'
   ) +
   theme_bw() +
   theme(
     axis.text.x = element_text(angle = 35, hjust = 1),
-    strip.text = element_text(face = "bold"),
-    legend.position = "bottom"
+    strip.text = element_text(face = 'bold'),
+    legend.position = 'bottom'
   )
 ```
 
@@ -127,29 +142,29 @@ ggplot(motif_long_prim, aes(tumor_group, singleton_dist, fill = tumor_group)) +
 
 ```{r tvr-mes-primary, fig.width = 14, fig.height = 11}
 data_mes_prim <- primary %>%
-  select(donor_id, ends_with("_singleton_dist"), cancer_group, tf_primary_rate, tf_blood_rate) %>%
-  filter(if_any(ends_with("_singleton_dist"), ~ !is.na(.))) %>%
+  select(donor_id, ends_with('_singleton_dist'), cancer_group, tf_primary_rate, tf_blood_rate) %>%
+  filter(if_any(ends_with('_singleton_dist'), ~ !is.na(.))) %>%
   mutate(cancer_group = factor(cancer_group,
-                               levels = c("Non_Mesenchymal_origin", "Mesenchymal_origin")))
+                               levels = c('Non_Mesenchymal_origin', 'Mesenchymal_origin')))
 
 motif_long_mes_prim <- data_mes_prim %>%
   pivot_longer(
-    cols = ends_with("_singleton_dist"),
-    names_to = "motif",
-    values_to = "singleton_dist"
+    cols = ends_with('_singleton_dist'),
+    names_to = 'motif',
+    values_to = 'singleton_dist'
   ) %>%
-  mutate(motif = str_remove(motif, "_singleton_dist"))
+  mutate(motif = str_remove(motif, '_singleton_dist'))
 
 group_labels_mes_prim <- data_mes_prim %>%
   count(cancer_group) %>%
-  mutate(label = paste0(cancer_group, " (n=", n, ")")) %>%
+  mutate(label = paste0(cancer_group, ' (n=', n, ')')) %>%
   { setNames(.$label, .$cancer_group) }
 
 kw_tests_mes_prim <- motif_long_mes_prim %>%
   group_by(motif) %>%
   kruskal_test(singleton_dist ~ cancer_group) %>%
-  adjust_pvalue(method = "BH") %>%
-  mutate(label = paste0("KW p=", signif(p.adj, 2)))
+  adjust_pvalue(method = 'BH') %>%
+  mutate(label = paste0('KW p=', signif(p.adj, 2)))
 
 kw_sig_motifs_mes_prim <- kw_tests_mes_prim %>%
   filter(p.adj < 0.05) %>%
@@ -158,12 +173,9 @@ kw_sig_motifs_mes_prim <- kw_tests_mes_prim %>%
 dunn_sig_mes_prim <- motif_long_mes_prim %>%
   filter(motif %in% kw_sig_motifs_mes_prim) %>%
   group_by(motif) %>%
-  dunn_test(singleton_dist ~ cancer_group, p.adjust.method = "BH") %>%
-  filter(p.adj.signif != "ns") %>%
-  add_xy_position(x = "cancer_group", scales = "free", step.increase = 0.12)
-
-mes_colors      <- c("Non_Mesenchymal_origin" = "grey60",  "Mesenchymal_origin" = "firebrick")
-mes_colors_dark <- c("Non_Mesenchymal_origin" = "grey40",  "Mesenchymal_origin" = "firebrick4")
+  dunn_test(singleton_dist ~ cancer_group, p.adjust.method = 'BH') %>%
+  filter(p.adj.signif != 'ns') %>%
+  add_xy_position(x = 'cancer_group', scales = 'free', step.increase = 0.12)
 
 ggplot(motif_long_mes_prim, aes(cancer_group, singleton_dist, fill = cancer_group)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.65, width = 0.65) +
@@ -173,12 +185,12 @@ ggplot(motif_long_mes_prim, aes(cancer_group, singleton_dist, fill = cancer_grou
     show.legend = FALSE
   ) +
   stat_summary(
-    fun = median, geom = "point",
-    shape = 23, size = 2.2, fill = "white", color = "black"
+    fun = median, geom = 'point',
+    shape = 23, size = 2.2, fill = 'white', color = 'black'
   ) +
   stat_pvalue_manual(
     dunn_sig_mes_prim,
-    label = "p.adj.signif",
+    label = 'p.adj.signif',
     tip.length = 0.01,
     inherit.aes = FALSE,
     hide.ns = TRUE
@@ -188,22 +200,22 @@ ggplot(motif_long_mes_prim, aes(cancer_group, singleton_dist, fill = cancer_grou
     aes(x = Inf, y = Inf, label = label),
     inherit.aes = FALSE,
     hjust = 1.05, vjust = 1.4,
-    size = 2.6, fontface = "italic", color = "grey30"
+    size = 2.6, fontface = 'italic', color = 'grey30'
   ) +
-  facet_wrap(~ motif, scales = "free_y", ncol = 3) +
+  facet_wrap(~ motif, scales = 'free_y', ncol = 3) +
   scale_fill_manual(values = mes_colors, labels = group_labels_mes_prim) +
   scale_color_manual(values = mes_colors_dark) +
   labs(
     x = NULL,
-    y = "Singleton distance",
-    fill = "Cancer group",
-    title = "TVR singleton distance: Mesenchymal vs Non-Mesenchymal origin (primary)"
+    y = 'Singleton distance',
+    fill = 'Cancer group',
+    title = 'TVR singleton distance: Mesenchymal vs Non-Mesenchymal origin (primary)'
   ) +
   theme_bw() +
   theme(
     axis.text.x = element_text(angle = 35, hjust = 1),
-    strip.text = element_text(face = "bold"),
-    legend.position = "bottom"
+    strip.text = element_text(face = 'bold'),
+    legend.position = 'bottom'
   )
 ```
 
@@ -215,33 +227,33 @@ data <- met_intrachrom %>%
   mutate(
     primary_tumor_group = case_when(
       # Trust primary_tumor_type when available
-      !is.na(primary_tumor_type) & primary_tumor_type == "Carcinoma" ~ "Carcinoma",
-      !is.na(primary_tumor_type) & primary_tumor_type == "Melanoma"  ~ "Melanoma",
-      !is.na(primary_tumor_type) & str_detect(primary_tumor_type, regex("sarcoma|gastrointestinal stromal", ignore_case = TRUE)) ~ "Sarcoma",
-      !is.na(primary_tumor_type) ~ "Other",
+      !is.na(primary_tumor_type) & primary_tumor_type == 'Carcinoma' ~ 'Carcinoma',
+      !is.na(primary_tumor_type) & primary_tumor_type == 'Melanoma'  ~ 'Melanoma',
+      !is.na(primary_tumor_type) & str_detect(primary_tumor_type, regex('sarcoma|gastrointestinal stromal', ignore_case = TRUE)) ~ 'Sarcoma',
+      !is.na(primary_tumor_type) ~ 'Other',
       # Fallback to cancer_type when primary_tumor_type is NA — only unambiguous keywords
-      str_detect(cancer_type, regex("melanoma",  ignore_case = TRUE)) ~ "Melanoma",
-      str_detect(cancer_type, regex("sarcoma|gastrointestinal stromal", ignore_case = TRUE)) ~ "Sarcoma",
-      str_detect(cancer_type, regex("carcinoma", ignore_case = TRUE)) ~ "Carcinoma",
-      TRUE ~ "Other"
+      str_detect(cancer_type, regex('melanoma',  ignore_case = TRUE)) ~ 'Melanoma',
+      str_detect(cancer_type, regex('sarcoma|gastrointestinal stromal', ignore_case = TRUE)) ~ 'Sarcoma',
+      str_detect(cancer_type, regex('carcinoma', ignore_case = TRUE)) ~ 'Carcinoma',
+      TRUE ~ 'Other'
     ),
-    primary_tumor_group = factor(primary_tumor_group, levels = c("Carcinoma", "Melanoma", "Sarcoma", "Other"))
+    primary_tumor_group = factor(primary_tumor_group, levels = c('Carcinoma', 'Melanoma', 'Sarcoma', 'Other'))
   ) %>%
-  select(patient_id, ends_with("_singleton_dist"), primary_tumor_group, tumor_tf_rate, blood_tf_rate) %>%
-  filter(if_any(ends_with("_singleton_dist"), ~ !is.na(.)))
+  select(patient_id, ends_with('_singleton_dist'), primary_tumor_group, tumor_tf_rate, blood_tf_rate) %>%
+  filter(if_any(ends_with('_singleton_dist'), ~ !is.na(.)))
 
 motif_long <- data %>%
   pivot_longer(
-    cols = ends_with("_singleton_dist"),
-    names_to = "motif",
-    values_to = "singleton_dist"
+    cols = ends_with('_singleton_dist'),
+    names_to = 'motif',
+    values_to = 'singleton_dist'
   ) %>%
-  mutate(motif = str_remove(motif, "_singleton_dist"))
+  mutate(motif = str_remove(motif, '_singleton_dist'))
 
 # Per-group sample sizes for the legend (one row per patient).
 group_labels <- data %>%
   count(primary_tumor_group) %>%
-  mutate(label = paste0(primary_tumor_group, " (n=", n, ")")) %>%
+  mutate(label = paste0(primary_tumor_group, ' (n=', n, ')')) %>%
   { setNames(.$label, .$primary_tumor_group) }
 
 # Omnibus Kruskal-Wallis per motif (BH-adjusted across motifs). Used both as the
@@ -249,8 +261,8 @@ group_labels <- data %>%
 kw_tests <- motif_long %>%
   group_by(motif) %>%
   kruskal_test(singleton_dist ~ primary_tumor_group) %>%
-  adjust_pvalue(method = "BH") %>%
-  mutate(label = paste0("KW p=", signif(p.adj, 2)))
+  adjust_pvalue(method = 'BH') %>%
+  mutate(label = paste0('KW p=', signif(p.adj, 2)))
 
 # Protected post-hoc: only run pairwise tests for motifs where the omnibus is
 # significant.
@@ -264,9 +276,9 @@ kw_sig_motifs <- kw_tests %>%
 dunn_sig <- motif_long %>%
   filter(motif %in% kw_sig_motifs) %>%
   group_by(motif) %>%
-  dunn_test(singleton_dist ~ primary_tumor_group, p.adjust.method = "BH") %>%
-  filter(p.adj.signif != "ns") %>%
-  add_xy_position(x = "primary_tumor_group", scales = "free", step.increase = 0.12)
+  dunn_test(singleton_dist ~ primary_tumor_group, p.adjust.method = 'BH') %>%
+  filter(p.adj.signif != 'ns') %>%
+  add_xy_position(x = 'primary_tumor_group', scales = 'free', step.increase = 0.12)
 
 ggplot(motif_long, aes(primary_tumor_group, singleton_dist, fill = primary_tumor_group)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.65, width = 0.65) +
@@ -279,16 +291,16 @@ ggplot(motif_long, aes(primary_tumor_group, singleton_dist, fill = primary_tumor
   ) +
   stat_summary(
     fun = median,
-    geom = "point",
+    geom = 'point',
     shape = 23,
     size = 2.2,
-    fill = "white",
-    color = "black"
+    fill = 'white',
+    color = 'black'
   ) +
   # Dunn's post-hoc brackets (BH-adjusted), only for significant comparisons
   stat_pvalue_manual(
     dunn_sig,
-    label = "p.adj.signif",
+    label = 'p.adj.signif',
     tip.length = 0.01,
     inherit.aes = FALSE,
     hide.ns = TRUE
@@ -301,23 +313,23 @@ ggplot(motif_long, aes(primary_tumor_group, singleton_dist, fill = primary_tumor
     hjust = 1.05,
     vjust = 1.4,
     size = 2.6,
-    fontface = "italic",
-    color = "grey30"
+    fontface = 'italic',
+    color = 'grey30'
   ) +
-  facet_wrap(~ motif, scales = "free_y", ncol = 3) +
-  scale_fill_brewer(palette = "Set2", labels = group_labels) +
-  scale_color_brewer(palette = "Set2") +
+  facet_wrap(~ motif, scales = 'free_y', ncol = 3) +
+  scale_fill_brewer(palette = 'Set2', labels = group_labels) +
+  scale_color_brewer(palette = 'Set2') +
   labs(
     x = NULL,
-    y = "Singleton distance",
-    fill = "Primary tumor group",
-    title = "TVR singleton distance distributions by primary tumor group"
+    y = 'Singleton distance',
+    fill = 'Primary tumor group',
+    title = 'TVR singleton distance distributions by primary tumor group'
   ) +
   theme_bw() +
   theme(
     axis.text.x = element_text(angle = 35, hjust = 1),
-    strip.text = element_text(face = "bold"),
-    legend.position = "bottom"
+    strip.text = element_text(face = 'bold'),
+    legend.position = 'bottom'
   )
 ```
 
@@ -326,30 +338,30 @@ ggplot(motif_long, aes(primary_tumor_group, singleton_dist, fill = primary_tumor
 ```{r tvr-mes-metastatic, fig.width = 14, fig.height = 11}
 data_mes_met <- met_mesenchymal %>%
   distinct(patient_id, .keep_all = TRUE) %>%
-  filter(tumor_origin %in% c("Mesenchymal", "Non_mesenchymal")) %>%
+  filter(tumor_origin %in% c('Mesenchymal', 'Non_mesenchymal')) %>%
   mutate(tumor_origin = factor(tumor_origin,
-                               levels = c("Non_mesenchymal", "Mesenchymal"))) %>%
-  select(patient_id, ends_with("_singleton_dist"), tumor_origin, tumor_tf_rate, blood_tf_rate) %>%
-  filter(if_any(ends_with("_singleton_dist"), ~ !is.na(.)))
+                               levels = c('Non_mesenchymal', 'Mesenchymal'))) %>%
+  select(patient_id, ends_with('_singleton_dist'), tumor_origin, tumor_tf_rate, blood_tf_rate) %>%
+  filter(if_any(ends_with('_singleton_dist'), ~ !is.na(.)))
 
 motif_long_mes_met <- data_mes_met %>%
   pivot_longer(
-    cols = ends_with("_singleton_dist"),
-    names_to = "motif",
-    values_to = "singleton_dist"
+    cols = ends_with('_singleton_dist'),
+    names_to = 'motif',
+    values_to = 'singleton_dist'
   ) %>%
-  mutate(motif = str_remove(motif, "_singleton_dist"))
+  mutate(motif = str_remove(motif, '_singleton_dist'))
 
 group_labels_mes_met <- data_mes_met %>%
   count(tumor_origin) %>%
-  mutate(label = paste0(tumor_origin, " (n=", n, ")")) %>%
+  mutate(label = paste0(tumor_origin, ' (n=', n, ')')) %>%
   { setNames(.$label, .$tumor_origin) }
 
 kw_tests_mes_met <- motif_long_mes_met %>%
   group_by(motif) %>%
   kruskal_test(singleton_dist ~ tumor_origin) %>%
-  adjust_pvalue(method = "BH") %>%
-  mutate(label = paste0("KW p=", signif(p.adj, 2)))
+  adjust_pvalue(method = 'BH') %>%
+  mutate(label = paste0('KW p=', signif(p.adj, 2)))
 
 kw_sig_motifs_mes_met <- kw_tests_mes_met %>%
   filter(p.adj < 0.05) %>%
@@ -358,12 +370,9 @@ kw_sig_motifs_mes_met <- kw_tests_mes_met %>%
 dunn_sig_mes_met <- motif_long_mes_met %>%
   filter(motif %in% kw_sig_motifs_mes_met) %>%
   group_by(motif) %>%
-  dunn_test(singleton_dist ~ tumor_origin, p.adjust.method = "BH") %>%
-  filter(p.adj.signif != "ns") %>%
-  add_xy_position(x = "tumor_origin", scales = "free", step.increase = 0.12)
-
-mes_colors      <- c("Non_mesenchymal" = "grey60", "Mesenchymal" = "firebrick")
-mes_colors_dark <- c("Non_mesenchymal" = "grey40", "Mesenchymal" = "firebrick4")
+  dunn_test(singleton_dist ~ tumor_origin, p.adjust.method = 'BH') %>%
+  filter(p.adj.signif != 'ns') %>%
+  add_xy_position(x = 'tumor_origin', scales = 'free', step.increase = 0.12)
 
 ggplot(motif_long_mes_met, aes(tumor_origin, singleton_dist, fill = tumor_origin)) +
   geom_boxplot(outlier.shape = NA, alpha = 0.65, width = 0.65) +
@@ -373,12 +382,12 @@ ggplot(motif_long_mes_met, aes(tumor_origin, singleton_dist, fill = tumor_origin
     show.legend = FALSE
   ) +
   stat_summary(
-    fun = median, geom = "point",
-    shape = 23, size = 2.2, fill = "white", color = "black"
+    fun = median, geom = 'point',
+    shape = 23, size = 2.2, fill = 'white', color = 'black'
   ) +
   stat_pvalue_manual(
     dunn_sig_mes_met,
-    label = "p.adj.signif",
+    label = 'p.adj.signif',
     tip.length = 0.01,
     inherit.aes = FALSE,
     hide.ns = TRUE
@@ -388,22 +397,22 @@ ggplot(motif_long_mes_met, aes(tumor_origin, singleton_dist, fill = tumor_origin
     aes(x = Inf, y = Inf, label = label),
     inherit.aes = FALSE,
     hjust = 1.05, vjust = 1.4,
-    size = 2.6, fontface = "italic", color = "grey30"
+    size = 2.6, fontface = 'italic', color = 'grey30'
   ) +
-  facet_wrap(~ motif, scales = "free_y", ncol = 3) +
+  facet_wrap(~ motif, scales = 'free_y', ncol = 3) +
   scale_fill_manual(values = mes_colors, labels = group_labels_mes_met) +
   scale_color_manual(values = mes_colors_dark) +
   labs(
     x = NULL,
-    y = "Singleton distance",
-    fill = "Tumor origin",
-    title = "TVR singleton distance: Mesenchymal vs Non-Mesenchymal origin (metastatic)"
+    y = 'Singleton distance',
+    fill = 'Tumor origin',
+    title = 'TVR singleton distance: Mesenchymal vs Non-Mesenchymal origin (metastatic)'
   ) +
   theme_bw() +
   theme(
     axis.text.x = element_text(angle = 35, hjust = 1),
-    strip.text = element_text(face = "bold"),
-    legend.position = "bottom"
+    strip.text = element_text(face = 'bold'),
+    legend.position = 'bottom'
   )
 ```
 
@@ -416,27 +425,27 @@ ggplot(motif_long_mes_met, aes(tumor_origin, singleton_dist, fill = tumor_origin
 # Metastatic file is long-format (one row per driver gene); collapse to one
 # row per patient before any per-sample analysis.
 metastatic <- readxl::read_xlsx(
-  here("data", "processed", "metastatic_red_edit_singleton_dist.xlsx")
-) |>
+  here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx')
+) %>%
   distinct(patient_id, .keep_all = TRUE)
 
 # --- Shared motif set ------------------------------------------------------
-# The 9 TVR motifs are stored under identical "<MOTIF>_singleton_dist" names in
+# The 9 TVR motifs are stored under identical '<MOTIF>_singleton_dist' names in
 # both datasets, so the comparison is strictly parallel.
-motifs <- c("ATAGGG", "CTAGGG", "GTAGGG", "TAAGGG",
-            "TCAGGG", "TGAGGG", "TTCGGG", "TTGGGG", "TTTGGG")
-sd_col <- function(m) paste0(m, "_singleton_dist")
+motifs <- c('ATAGGG', 'CTAGGG', 'GTAGGG', 'TAAGGG',
+            'TCAGGG', 'TGAGGG', 'TTCGGG', 'TTGGGG', 'TTTGGG')
+sd_col <- function(m) paste0(m, '_singleton_dist')
 
-group_colors <- c("rest" = "#4E79A7", "top" = "#E15759")
+group_colors <- c('rest' = '#4E79A7', 'top' = '#E15759')
 ```
 
 ```{r helpers}
-# Label samples as "top" vs "rest" by an upper-tail TF-rate quantile.
-# Ties at the threshold fall into "rest" (strict > cutoff for "top").
+# Label samples as 'top' vs 'rest' by an upper-tail TF-rate quantile.
+# Ties at the threshold fall into 'rest' (strict > cutoff for 'top').
 assign_top <- function(df, tf_var, top_frac) {
   cutoff <- quantile(df[[tf_var]], probs = 1 - top_frac, na.rm = TRUE)
-  df |> mutate(tf_group = factor(if_else(.data[[tf_var]] > cutoff, "top", "rest"),
-                                 levels = c("rest", "top")))
+  df %>% mutate(tf_group = factor(if_else(.data[[tf_var]] > cutoff, 'top', 'rest'),
+                                 levels = c('rest', 'top')))
 }
 
 # Per-motif Wilcoxon rank-sum (top vs rest) on the raw singleton_dist value.
@@ -445,9 +454,9 @@ assign_top <- function(df, tf_var, top_frac) {
 test_motifs <- function(df, top_frac) {
   map_dfr(motifs, function(m) {
     col <- sd_col(m)
-    sub <- df |> filter(!is.na(.data[[col]])) |> select(value = all_of(col), tf_group)
-    top  <- sub$value[sub$tf_group == "top"]
-    rest <- sub$value[sub$tf_group == "rest"]
+    sub <- df %>% filter(!is.na(.data[[col]])) %>% select(value = all_of(col), tf_group)
+    top  <- sub$value[sub$tf_group == 'top']
+    rest <- sub$value[sub$tf_group == 'rest']
     wt <- wilcox.test(top, rest)
     tibble(
       motif       = m,
@@ -459,33 +468,33 @@ test_motifs <- function(df, top_frac) {
       W           = unname(wt$statistic),
       p           = wt$p.value
     )
-  }) |>
-    mutate(p.adj = p.adjust(p, method = "BH"),
+  }) %>%
+    mutate(p.adj = p.adjust(p, method = 'BH'),
            signif = cut(p.adj,
                         breaks = c(-Inf, 0.001, 0.01, 0.05, Inf),
-                        labels = c("***", "**", "*", "ns"))) |>
+                        labels = c('***', '**', '*', 'ns'))) %>%
     relocate(p.adj, signif, .after = p)
 }
 
 fmt_table <- function(tbl) {
-  tbl |>
+  tbl %>%
     mutate(across(c(median_top, median_rest, median_diff), \(x) round(x, 3)),
            p     = signif(p, 3),
-           p.adj = signif(p.adj, 3)) |>
+           p.adj = signif(p.adj, 3)) %>%
     kable()
 }
 
 # Long-format frame for faceted boxplots.
 boxplot_df <- function(df) {
-  df |>
-    select(tf_group, all_of(sd_col(motifs))) |>
-    pivot_longer(-tf_group, names_to = "motif", values_to = "value") |>
-    mutate(motif = str_remove(motif, "_singleton_dist")) |>
+  df %>%
+    select(tf_group, all_of(sd_col(motifs))) %>%
+    pivot_longer(-tf_group, names_to = 'motif', values_to = 'value') %>%
+    mutate(motif = str_remove(motif, '_singleton_dist')) %>%
     filter(!is.na(value))
 }
 
 plot_motifs <- function(df, res, title) {
-  sig_df <- res |> select(motif, label = signif)
+  sig_df <- res %>% select(motif, label = signif)
 
   ggplot(boxplot_df(df), aes(tf_group, value, fill = tf_group)) +
     geom_boxplot(outlier.size = 0.6, outlier.alpha = 0.3, width = 0.6) +
@@ -496,11 +505,11 @@ plot_motifs <- function(df, res, title) {
       vjust = 1.5,
       size = 4.5
     ) +
-    facet_wrap(~ motif, scales = "free_y", nrow = 3) +
+    facet_wrap(~ motif, scales = 'free_y', nrow = 3) +
     scale_fill_manual(values = group_colors) +
-    labs(x = NULL, y = "singleton_dist", title = title) +
+    labs(x = NULL, y = 'singleton_dist', title = title) +
     theme_bw(base_size = 11) +
-    theme(legend.position = "none")
+    theme(legend.position = 'none')
 }
 ```
 
@@ -512,10 +521,10 @@ This analysis runs the **same comparison independently** in the primary (PCAWG) 
 -   **Direction:** `median_diff = median(top) − median(rest)`.
 
 ```{r assign-groups}
-prim_5 <- assign_top(primary,    "tf_primary_rate", 0.05)
-prim_10 <- assign_top(primary,    "tf_primary_rate", 0.10)
-meta_5 <- assign_top(metastatic, "tumor_tf_rate",   0.05)
-meta_10 <- assign_top(metastatic, "tumor_tf_rate",   0.10)
+prim_5 <- assign_top(primary,    'tf_primary_rate', 0.05)
+prim_10 <- assign_top(primary,    'tf_primary_rate', 0.10)
+meta_5 <- assign_top(metastatic, 'tumor_tf_rate',   0.05)
+meta_10 <- assign_top(metastatic, 'tumor_tf_rate',   0.10)
 ```
 
 ## Primary (PCAWG)
@@ -528,7 +537,7 @@ fmt_table(res_prim_5)
 ```
 
 ```{r prim-5-plot, fig.width = 10, fig.height = 8}
-plot_motifs(prim_5, res_prim_5, "Primary — singleton_dist, top 5% tTF vs rest")
+plot_motifs(prim_5, res_prim_5, 'Primary — singleton_dist, top 5% tTF vs rest')
 ```
 
 ### Top 10% TF rate
@@ -539,7 +548,7 @@ fmt_table(res_prim_10)
 ```
 
 ```{r prim-10-plot, fig.width = 10, fig.height = 8}
-plot_motifs(prim_10, res_prim_10, "Primary — singleton_dist, top 10% tTF vs rest")
+plot_motifs(prim_10, res_prim_10, 'Primary — singleton_dist, top 10% tTF vs rest')
 ```
 
 ## Metastatic
@@ -552,7 +561,7 @@ fmt_table(res_meta_5)
 ```
 
 ```{r meta-5-plot, fig.width = 10, fig.height = 8}
-plot_motifs(meta_5, res_meta_5, "Metastatic — singleton_dist, top 5% tTF vs rest")
+plot_motifs(meta_5, res_meta_5, 'Metastatic — singleton_dist, top 5% tTF vs rest')
 ```
 
 ### Top 10% TF rate
@@ -563,7 +572,7 @@ fmt_table(res_meta_10)
 ```
 
 ```{r meta-10-plot, fig.width = 10, fig.height = 8}
-plot_motifs(meta_10, res_meta_10, "Metastatic — singleton_dist, top 10% tTF vs rest")
+plot_motifs(meta_10, res_meta_10, 'Metastatic — singleton_dist, top 10% tTF vs rest')
 ```
 
 # Singleton-distribution differences in top-bTF samples — Primary vs Metastatic
@@ -576,10 +585,10 @@ Same analysis as above but stratifying by **blood TF rate** (bTF: `tf_blood_rate
 -   **Direction:** `median_diff = median(top) − median(rest)`.
 
 ```{r assign-groups-bTF}
-prim_b5  <- assign_top(primary,    "tf_blood_rate",  0.05)
-prim_b10 <- assign_top(primary,    "tf_blood_rate",  0.10)
-meta_b5  <- assign_top(metastatic, "blood_tf_rate",  0.05)
-meta_b10 <- assign_top(metastatic, "blood_tf_rate",  0.10)
+prim_b5  <- assign_top(primary,    'tf_blood_rate',  0.05)
+prim_b10 <- assign_top(primary,    'tf_blood_rate',  0.10)
+meta_b5  <- assign_top(metastatic, 'blood_tf_rate',  0.05)
+meta_b10 <- assign_top(metastatic, 'blood_tf_rate',  0.10)
 ```
 
 ## Primary (PCAWG)
@@ -592,7 +601,7 @@ fmt_table(res_prim_b5)
 ```
 
 ```{r prim-b5-plot, fig.width = 10, fig.height = 8}
-plot_motifs(prim_b5, res_prim_b5, "Primary — singleton_dist, top 5% bTF vs rest")
+plot_motifs(prim_b5, res_prim_b5, 'Primary — singleton_dist, top 5% bTF vs rest')
 ```
 
 ### Top 10% bTF rate
@@ -603,7 +612,7 @@ fmt_table(res_prim_b10)
 ```
 
 ```{r prim-b10-plot, fig.width = 10, fig.height = 8}
-plot_motifs(prim_b10, res_prim_b10, "Primary — singleton_dist, top 10% bTF vs rest")
+plot_motifs(prim_b10, res_prim_b10, 'Primary — singleton_dist, top 10% bTF vs rest')
 ```
 
 ## Metastatic
@@ -616,7 +625,7 @@ fmt_table(res_meta_b5)
 ```
 
 ```{r meta-b5-plot, fig.width = 10, fig.height = 8}
-plot_motifs(meta_b5, res_meta_b5, "Metastatic — singleton_dist, top 5% bTF vs rest")
+plot_motifs(meta_b5, res_meta_b5, 'Metastatic — singleton_dist, top 5% bTF vs rest')
 ```
 
 ### Top 10% bTF rate
@@ -627,7 +636,7 @@ fmt_table(res_meta_b10)
 ```
 
 ```{r meta-b10-plot, fig.width = 10, fig.height = 8}
-plot_motifs(meta_b10, res_meta_b10, "Metastatic — singleton_dist, top 10% bTF vs rest")
+plot_motifs(meta_b10, res_meta_b10, 'Metastatic — singleton_dist, top 10% bTF vs rest')
 ```
 
 # Final comparison — primary vs metastatic
@@ -640,12 +649,12 @@ plot_motifs(meta_b10, res_meta_b10, "Metastatic — singleton_dist, top 10% bTF 
 
 ```{r final-tTF-5}
 left_join(
-  res_prim_5 |> select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
-  res_meta_5 |> select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
-  by = "motif"
-) |>
+  res_prim_5 %>% select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
+  res_meta_5 %>% select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
+  by = 'motif'
+) %>%
   mutate(across(c(prim_diff, meta_diff), \(x) round(x, 3)),
-         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) |>
+         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) %>%
   kable()
 ```
 
@@ -653,12 +662,12 @@ left_join(
 
 ```{r final-tTF-10}
 left_join(
-  res_prim_10 |> select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
-  res_meta_10 |> select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
-  by = "motif"
-) |>
+  res_prim_10 %>% select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
+  res_meta_10 %>% select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
+  by = 'motif'
+) %>%
   mutate(across(c(prim_diff, meta_diff), \(x) round(x, 3)),
-         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) |>
+         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) %>%
   kable()
 ```
 
@@ -668,12 +677,12 @@ left_join(
 
 ```{r final-bTF-5}
 left_join(
-  res_prim_b5 |> select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
-  res_meta_b5 |> select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
-  by = "motif"
-) |>
+  res_prim_b5 %>% select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
+  res_meta_b5 %>% select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
+  by = 'motif'
+) %>%
   mutate(across(c(prim_diff, meta_diff), \(x) round(x, 3)),
-         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) |>
+         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) %>%
   kable()
 ```
 
@@ -681,12 +690,12 @@ left_join(
 
 ```{r final-bTF-10}
 left_join(
-  res_prim_b10 |> select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
-  res_meta_b10 |> select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
-  by = "motif"
-) |>
+  res_prim_b10 %>% select(motif, prim_diff = median_diff, prim_p.adj = p.adj, prim_signif = signif),
+  res_meta_b10 %>% select(motif, meta_diff = median_diff, meta_p.adj = p.adj, meta_signif = signif),
+  by = 'motif'
+) %>%
   mutate(across(c(prim_diff, meta_diff), \(x) round(x, 3)),
-         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) |>
+         across(c(prim_p.adj, meta_p.adj), \(x) signif(x, 3))) %>%
   kable()
 ```
 
@@ -698,18 +707,18 @@ tttggg_min_n <- 10
 tttggg_data <- bind_rows(
   primary %>%
     select(sample_id = donor_id, cancer_type, TTTGGG_singleton_dist) %>%
-    mutate(cohort = "Primary"),
+    mutate(cohort = 'Primary'),
   met_intrachrom %>%
     distinct(patient_id, .keep_all = TRUE) %>%
     select(sample_id = patient_id, cancer_type, TTTGGG_singleton_dist) %>%
-    mutate(cohort = "Metastatic")
+    mutate(cohort = 'Metastatic')
 ) %>%
   filter(!is.na(TTTGGG_singleton_dist), !is.na(cancer_type)) %>%
   group_by(cohort, cancer_type) %>%
   mutate(n_cancer_type = n()) %>%
   ungroup() %>%
   filter(n_cancer_type >= tttggg_min_n) %>%
-  mutate(cohort = factor(cohort, levels = c("Primary", "Metastatic")))
+  mutate(cohort = factor(cohort, levels = c('Primary', 'Metastatic')))
 
 # One-vs-rest Wilcoxon rank-sum, one-sided lower tail: is this cancer type
 # shifted to LOWER TTTGGG_singleton_dist than all other cancer types in the same
@@ -724,7 +733,7 @@ tttggg_tests <- tttggg_data %>%
     map_dfr(unique(df$cancer_type), function(ct) {
       a <- df$TTTGGG_singleton_dist[df$cancer_type == ct]
       b <- df$TTTGGG_singleton_dist[df$cancer_type != ct]
-      wt <- wilcox.test(a, b, alternative = "less")
+      wt <- wilcox.test(a, b, alternative = 'less')
       tibble(
         cancer_type   = ct,
         n             = length(a),
@@ -739,8 +748,8 @@ tttggg_tests <- tttggg_data %>%
   ungroup() %>%
   group_by(cohort) %>%
   mutate(
-    p_low_adj = p.adjust(p_low, method = "BH"),
-    low_signal = if_else(p_low_adj < 0.05, "lower than rest", "not significant")
+    p_low_adj = p.adjust(p_low, method = 'BH'),
+    low_signal = if_else(p_low_adj < 0.05, 'lower than rest', 'not significant')
   ) %>%
   ungroup() %>%
   arrange(cohort, median)
@@ -748,11 +757,11 @@ tttggg_tests <- tttggg_data %>%
 tttggg_plot_data <- tttggg_data %>%
   left_join(
     tttggg_tests %>% select(cohort, cancer_type, n, median, low_signal),
-    by = c("cohort", "cancer_type")
+    by = c('cohort', 'cancer_type')
   ) %>%
   mutate(
     cancer_type_ordered = fct_reorder(
-      paste0(cohort, "___", cancer_type, "\n", "n=", n),
+      paste0(cohort, '___', cancer_type, "\n', 'n=", n),
       median,
       .fun = first
     )
@@ -761,15 +770,15 @@ tttggg_plot_data <- tttggg_data %>%
 tam_cols <- c('TERT_amp', 'TERTp_mut', 'TERT_mult', 'TERTp_sv')
 
 tttggg_tam_data <- tttggg_plot_data %>%
-  filter(cohort == "Primary") %>%
+  filter(cohort == 'Primary') %>%
   left_join(
     primary %>% select(donor_id, all_of(tam_cols)),
-    by = c("sample_id" = "donor_id")
+    by = c('sample_id' = 'donor_id')
   ) %>%
   pivot_longer(
     cols      = all_of(tam_cols),
-    names_to  = "tam_type",
-    values_to = "tam_present"
+    names_to  = 'tam_type',
+    values_to = 'tam_present'
   ) %>%
   filter(tam_present == TRUE)
 ```
@@ -778,7 +787,7 @@ tttggg_tam_data <- tttggg_plot_data %>%
 
 ```{r tttggg-cancer-type-rank-plot, fig.width = 18, fig.height = 10}
 ggplot(tttggg_plot_data, aes(cancer_type_ordered, TTTGGG_singleton_dist)) +
-  geom_hline(yintercept = 0, linetype = "dashed", color = "grey50") +
+  geom_hline(yintercept = 0, linetype = 'dashed', color = 'grey50') +
   geom_point(
     aes(color = low_signal),
     position = position_jitter(width = 0.22, height = 0),
@@ -788,43 +797,43 @@ ggplot(tttggg_plot_data, aes(cancer_type_ordered, TTTGGG_singleton_dist)) +
   ) +
   stat_summary(
     fun = median,
-    geom = "crossbar",
+    geom = 'crossbar',
     width = 0.55,
     fatten = 0,
-    color = "black"
+    color = 'black'
   ) +
   geom_point(
     data     = tttggg_tam_data,
     aes(shape = tam_type, fill = tam_type),
-    color    = "black",
+    color    = 'black',
     size     = 2.4,
     alpha    = 0.7,
     position = position_jitter(width = 0.22, height = 0, seed = 1)
   ) +
-  facet_wrap(~ cohort, scales = "free_x", ncol = 1) +
-  scale_color_manual(values = c("lower than rest" = "firebrick", "not significant" = "grey65")) +
+  facet_wrap(~ cohort, scales = 'free_x', ncol = 1) +
+  scale_color_manual(values = c('lower than rest' = 'firebrick', 'not significant' = 'grey65')) +
   scale_shape_manual(
-    name   = "TAM (primary)",
+    name   = 'TAM (primary)',
     values = c(TERT_amp = 21, TERTp_mut = 24, TERT_mult = 22, TERTp_sv = 23)
   ) +
   scale_fill_manual(
-    name   = "TAM (primary)",
-    values = c(TERT_amp = "#E69F00", TERTp_mut = "#56B4E9", TERT_mult = "#CC79A7", TERTp_sv = "#009E73")
+    name   = 'TAM (primary)',
+    values = c(TERT_amp = '#E69F00', TERTp_mut = '#56B4E9', TERT_mult = '#CC79A7', TERTp_sv = '#009E73')
   ) +
-  scale_x_discrete(labels = \(x) str_remove(x, "^.*___")) +
+  scale_x_discrete(labels = \(x) str_remove(x, '^.*___')) +
   labs(
     x = NULL,
-    y = "TTTGGG singleton_dist log2(tumor/control)",
-    title = "TTTGGG by cancer type — ordered by median, lower-tail test highlighted",
+    y = 'TTTGGG singleton_dist log2(tumor/control)',
+    title = 'TTTGGG by cancer type — ordered by median, lower-tail test highlighted',
     subtitle = paste0(
-      "Cancer types with n >= ", tttggg_min_n,
-      "; red = significantly lower than rest of cohort (one-vs-rest Wilcoxon, BH < 0.05)"
+      'Cancer types with n >= ', tttggg_min_n,
+      '; red = significantly lower than rest of cohort (one-vs-rest Wilcoxon, BH < 0.05)'
     )
   ) +
   theme_bw() +
   theme(
     axis.text.x = element_text(angle = 55, hjust = 1, size = 8),
-    strip.text = element_text(face = "bold")
+    strip.text = element_text(face = 'bold')
   )
 ```
 
@@ -833,30 +842,30 @@ ggplot(
   tttggg_tests,
   aes(
     x = median_diff,
-    y = fct_reorder(paste0(cancer_type, " (n=", n, ")"), median_diff, .desc = TRUE)
+    y = fct_reorder(paste0(cancer_type, ' (n=', n, ')'), median_diff, .desc = TRUE)
   )
 ) +
-  geom_vline(xintercept = 0, linetype = "dashed", color = "grey35") +
+  geom_vline(xintercept = 0, linetype = 'dashed', color = 'grey35') +
   geom_col(aes(fill = low_signal), width = 0.72) +
-  facet_wrap(~ cohort, scales = "free_y", ncol = 2) +
+  facet_wrap(~ cohort, scales = 'free_y', ncol = 2) +
   scale_fill_manual(
     values = c(
-      "lower than rest" = "firebrick",
-      "not significant" = "grey75"
+      'lower than rest' = 'firebrick',
+      'not significant' = 'grey75'
     )
   ) +
   labs(
-    x = "Median TTTGGG singleton_dist relative to rest of cohort (log2)",
+    x = 'Median TTTGGG singleton_dist relative to rest of cohort (log2)',
     y = NULL,
-    fill = "Signal",
+    fill = 'Signal',
     title = "How much lower is each cancer type's TTTGGG vs the rest of its cohort",
     subtitle = paste0(
-      "Cancer types with n >= ", tttggg_min_n,
-      "; negative = lower than cohort rest. Red = one-vs-rest Wilcoxon BH < 0.05"
+      'Cancer types with n >= ', tttggg_min_n,
+      '; negative = lower than cohort rest. Red = one-vs-rest Wilcoxon BH < 0.05'
     )
   ) +
   theme_bw() +
-  theme(legend.position = "bottom")
+  theme(legend.position = 'bottom')
 ```
 
 ```{r tttggg-test-table}
@@ -871,5 +880,5 @@ tttggg_tests %>%
     p_low_adj = signif(p_low_adj, 3)
   ) %>%
   arrange(cohort, p_low_adj) %>%
-  kable(caption = "TTTGGG one-vs-rest lower-tail Wilcoxon by cancer type (primary and metastatic)")
+  kable(caption = 'TTTGGG one-vs-rest lower-tail Wilcoxon by cancer type (primary and metastatic)')
 ```

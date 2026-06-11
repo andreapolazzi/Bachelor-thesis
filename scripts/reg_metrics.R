@@ -7,6 +7,6 @@ reg_fold_metrics <- function(pred, truth) {
   tibble(
     rmse     = sqrt(mean((truth - pred)^2)),
     mae      = mean(abs(truth - pred)),
-    spearman = suppressWarnings(cor(truth, pred, method = "spearman"))
+    spearman = suppressWarnings(cor(truth, pred, method = 'spearman'))
   )
 }

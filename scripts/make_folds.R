@@ -7,7 +7,7 @@
 #       `strata` (e.g. alt_status). Reproduces the manual 5x5 construction used in
 #       notebooks 02/10/20 when called as make_folds(alt_status).
 #
-#   SHAP uses a single 5-fold partition = repeat 1 (column "rep1") of this matrix, so
+#   SHAP uses a single 5-fold partition = repeat 1 (column 'rep1') of this matrix, so
 #   the SHAP out-of-fold split is consistent with the CV folds rather than a separate
 #   createFolds() draw.
 
@@ -16,7 +16,7 @@ make_folds <- function(strata, k = 5, n_repeats = 5, seed = 21) {
   n <- length(strata)
   set.seed(seed)
   fold_mat <- matrix(0L, n, n_repeats,
-                     dimnames = list(NULL, paste0("rep", seq_len(n_repeats))))
+                     dimnames = list(NULL, paste0('rep', seq_len(n_repeats))))
   for (r in seq_len(n_repeats)) {
     fid <- integer(n)
     for (lv in levels(strata)) {                 # ALT-low before ALT-high (level order)

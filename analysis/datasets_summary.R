@@ -1,6 +1,8 @@
 library(tidyverse)
 library(readxl)
 library(here)
+library(skimr)
+library(openxlsx)
 source('scripts/clean_columns.R')
 
 data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
@@ -31,8 +33,6 @@ pat_summary <- data3 %>%
   skim()
 
 
-library(skimr)
-library(openxlsx)
 report <- skim(data3)
 write.xlsx(report, 'dataset_summary2.xlsx')
-write.xlsx(pat_summary, "Summary_Pazienti_Unici.xlsx")
+write.xlsx(pat_summary, 'Summary_Pazienti_Unici.xlsx')

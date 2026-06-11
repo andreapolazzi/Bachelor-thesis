@@ -56,10 +56,10 @@ library(randomForest)
 library(glmnet)
 library(knitr)
 
-source(here("scripts", "make_folds.R"))
-source(here("scripts", "reg_metrics.R"))
+source(here('scripts', 'make_folds.R'))
+source(here('scripts', 'reg_metrics.R'))
 
-raw <- read_xlsx(here("data", "processed", "PCAWG_primary.xlsx"))
+raw <- read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 # cohort prep mirroring notebooks 13_1 (tTF) and 15_1 (bTF)
 prep_cohort <- function(filter_outlier) {
@@ -71,7 +71,7 @@ prep_cohort <- function(filter_outlier) {
       tf_blood_rate           = log1p(tf_blood_rate),
       telomere_insertion_rate = log1p(telomere_insertion_rate),
       TERT_FPKM               = log1p(TERT_FPKM),
-      alt_status              = factor(alt_status, levels = c("ALT-low", "ALT-high"))
+      alt_status              = factor(alt_status, levels = c('ALT-low', 'ALT-high'))
     ) %>%
     select(-donor_id, -cancer_type, -Specimen.Type.Summary, -cancer_group)
 }
@@ -83,7 +83,7 @@ prep_cohort <- function(filter_outlier) {
 # metrics (long) for one target.
 run_target <- function(target, filter_outlier, oof_name, cmp_subdir) {
   dat <- prep_cohort(filter_outlier)
-  X   <- model.matrix(reformulate(".", target), dat)[, -1]   # numeric design (alt_status -> dummy)
+  X   <- model.matrix(reformulate('.', target), dat)[, -1]   # numeric design (alt_status -> dummy)
   y   <- dat[[target]]
 
   fold_mat  <- make_folds(dat$alt_status, k = 5, n_repeats = 5, seed = 21)
@@ -92,39 +92,39 @@ run_target <- function(target, filter_outlier, oof_name, cmp_subdir) {
   res <- tibble()
   for (s in cv_splits) {
     dtr <- dat[s$train, ]; dte <- dat[s$test, ]
-    p_lm <- predict(lm(reformulate(".", target), dtr), dte)
+    p_lm <- predict(lm(reformulate('.', target), dtr), dte)
     cvg  <- cv.glmnet(X[s$train, ], y[s$train], alpha = 1)
-    p_la <- as.numeric(predict(cvg, X[s$test, ], s = "lambda.min"))
-    p_rf <- predict(randomForest(reformulate(".", target), data = dtr, ntree = 500), dte)
+    p_la <- as.numeric(predict(cvg, X[s$test, ], s = 'lambda.min'))
+    p_rf <- predict(randomForest(reformulate('.', target), data = dtr, ntree = 500), dte)
     res <- bind_rows(res,
-      reg_fold_metrics(p_lm, y[s$test]) %>% mutate(model = "LM",    rep = s$rep, fold = s$fold),
-      reg_fold_metrics(p_la, y[s$test]) %>% mutate(model = "LASSO", rep = s$rep, fold = s$fold),
-      reg_fold_metrics(p_rf, y[s$test]) %>% mutate(model = "RF",    rep = s$rep, fold = s$fold))
+      reg_fold_metrics(p_lm, y[s$test]) %>% mutate(model = 'LM',    rep = s$rep, fold = s$fold),
+      reg_fold_metrics(p_la, y[s$test]) %>% mutate(model = 'LASSO', rep = s$rep, fold = s$fold),
+      reg_fold_metrics(p_rf, y[s$test]) %>% mutate(model = 'RF',    rep = s$rep, fold = s$fold))
   }
 
   # export cohort + folds for the TabPFN HPC run
-  cmp_dir <- here("outputs", cmp_subdir)
+  cmp_dir <- here('outputs', cmp_subdir)
   dir.create(cmp_dir, recursive = TRUE, showWarnings = FALSE)
-  readr::write_csv(as.data.frame(X),        file.path(cmp_dir, "X_full.csv"))
-  readr::write_csv(data.frame(y = y),       file.path(cmp_dir, "y_full.csv"))
-  readr::write_csv(as.data.frame(fold_mat), file.path(cmp_dir, "folds_5x5.csv"))
+  readr::write_csv(as.data.frame(X),        file.path(cmp_dir, 'X_full.csv'))
+  readr::write_csv(data.frame(y = y),       file.path(cmp_dir, 'y_full.csv'))
+  readr::write_csv(as.data.frame(fold_mat), file.path(cmp_dir, 'folds_5x5.csv'))
 
   # TabPFN out-of-fold predictions, if the HPC run is done
-  oof_csv <- here("outputs", oof_name)
+  oof_csv <- here('outputs', oof_name)
   if (file.exists(oof_csv)) {
     tp <- readr::read_csv(oof_csv, show_col_types = FALSE) %>%
       group_by(rep, fold) %>%
       group_modify(~ reg_fold_metrics(.x$yhat, .x$y)) %>%
-      ungroup() %>% mutate(model = "TabPFN")
+      ungroup() %>% mutate(model = 'TabPFN')
     res <- bind_rows(res, tp)
   }
   res %>% mutate(target = target)
 }
 
-ttf <- run_target("tf_primary_rate", TRUE,  "tabpfn_reg_ttf_oof.csv", "cmp_reg_ttf_cv")
-btf <- run_target("tf_blood_rate",   FALSE, "tabpfn_reg_btf_oof.csv", "cmp_reg_btf_cv")
+ttf <- run_target('tf_primary_rate', TRUE,  'tabpfn_reg_ttf_oof.csv', 'cmp_reg_ttf_cv')
+btf <- run_target('tf_blood_rate',   FALSE, 'tabpfn_reg_btf_oof.csv', 'cmp_reg_btf_cv')
 perfold <- bind_rows(ttf, btf) %>%
-  mutate(target = recode(target, tf_primary_rate = "tTF (tumour)", tf_blood_rate = "bTF (blood)"))
+  mutate(target = recode(target, tf_primary_rate = 'tTF (tumour)', tf_blood_rate = 'bTF (blood)'))
 ```
 
 # Results
@@ -134,40 +134,40 @@ summ <- perfold %>%
   group_by(target, model) %>%
   summarise(across(c(rmse, mae, spearman),
                    list(m = ~mean(.x, na.rm = TRUE), s = ~sd(.x, na.rm = TRUE))),
-            .groups = "drop") %>%
+            .groups = 'drop') %>%
   arrange(target, rmse_m)
 
-fmt <- function(m, s) sprintf("%.3f ± %.3f", m, s)
+fmt <- function(m, s) sprintf('%.3f ± %.3f', m, s)
 tab <- summ %>% transmute(
   Target = target, Model = model,
   RMSE = fmt(rmse_m, rmse_s), MAE = fmt(mae_m, mae_s),
   `Spearman ρ` = fmt(spearman_m, spearman_s)
 )
-readr::write_csv(tab, here("outputs", "regression_comparison_table.csv"))
-kable(tab, caption = "TF-rate regression — shared 5x5 stratified CV (mean ± SD over 25 folds, log1p space). TabPFN rows appear once scripts/tabpfn_cv_oof.py --task regression has been run on carmela.")
+readr::write_csv(tab, here('outputs', 'regression_comparison_table.csv'))
+kable(tab, caption = 'TF-rate regression — shared 5x5 stratified CV (mean ± SD over 25 folds, log1p space). TabPFN rows appear once scripts/tabpfn_cv_oof.py --task regression has been run on carmela.')
 ```
 
 ```{r boxplot, fig.width=9, fig.height=6}
-okabe <- c("#0072B2", "#E69F00", "#009E73", "#D55E00")
+okabe <- c('#0072B2', '#E69F00', '#009E73', '#D55E00')
 plot_df <- perfold %>%
-  pivot_longer(c(rmse, mae, spearman), names_to = "metric", values_to = "value") %>%
-  mutate(metric = recode(metric, rmse = "RMSE", mae = "MAE", spearman = "Spearman ρ"),
-         model  = factor(model, levels = c("LM", "LASSO", "RF", "TabPFN")))
+  pivot_longer(c(rmse, mae, spearman), names_to = 'metric', values_to = 'value') %>%
+  mutate(metric = recode(metric, rmse = 'RMSE', mae = 'MAE', spearman = 'Spearman ρ'),
+         model  = factor(model, levels = c('LM', 'LASSO', 'RF', 'TabPFN')))
 
 p <- ggplot(plot_df, aes(model, value, fill = model)) +
   geom_boxplot(alpha = .6, outlier.shape = NA, width = .6) +
   geom_jitter(width = .12, size = .8, alpha = .4) +
-  facet_grid(target ~ metric, scales = "free") +
+  facet_grid(target ~ metric, scales = 'free') +
   scale_fill_manual(values = okabe) +
   coord_flip() +
-  labs(title = "TF-rate regression - shared 5x5 stratified CV (log1p space)",
-       subtitle = "Per-fold distribution over 25 folds; identical folds shared across all models",
+  labs(title = 'TF-rate regression - shared 5x5 stratified CV (log1p space)',
+       subtitle = 'Per-fold distribution over 25 folds; identical folds shared across all models',
        x = NULL, y = NULL) +
   theme_bw(base_size = 12) +
-  theme(legend.position = "none", plot.title = element_text(face = "bold", size = 12))
+  theme(legend.position = 'none', plot.title = element_text(face = 'bold', size = 12))
 
-ggsave(here("outputs", "regression_comparison.pdf"), p, width = 9, height = 6)
-ggsave(here("outputs", "regression_comparison.png"), p, width = 9, height = 6, dpi = 150)
+ggsave(here('outputs', 'regression_comparison.pdf'), p, width = 9, height = 6)
+ggsave(here('outputs', 'regression_comparison.png'), p, width = 9, height = 6, dpi = 150)
 p
 ```
 

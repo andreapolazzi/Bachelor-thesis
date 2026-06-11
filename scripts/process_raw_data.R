@@ -1,5 +1,6 @@
 library(tidyverse)
 library(here)
+library(writexl)
 source('scripts/clean_columns.R')
 
 # Drivers telins ####
@@ -91,8 +92,8 @@ summary(drivers_final)
 
 # Clean TTAGGG dataset ####
 TTAGGG_counts_tum_no_junction <- TTAGGG_counts %>% 
-  filter(str_starts(Sample, "tumor")) %>% 
-  select(-ncol(TTAGGG_counts), -contains("junction"))
+  filter(str_starts(Sample, 'tumor')) %>% 
+  select(-ncol(TTAGGG_counts), -contains('junction'))
 
 
 # Average TTAGGG counts for each band - visualization ####
@@ -101,18 +102,18 @@ band_means <- TTAGGG_counts_tum_no_junction %>%
   summarise(across(everything(), ~ mean(.x, na.rm = TRUE))) %>%
   pivot_longer(
     cols = everything(),
-    names_to = "band",
-    values_to = "mean_counts"
+    names_to = 'band',
+    values_to = 'mean_counts'
   )
 
-# tabella delle bande più alte
+# table of the highest-mean bands
 band_means %>% 
   mutate(is_outlier = mean_counts > quantile(mean_counts, 0.95)) %>% 
   arrange(desc(mean_counts)) %>% 
   slice(1:50) %>% 
   View()
 
-# plot delle 50 bande con media più alta
+# plot of the 50 highest-mean bands
 band_means %>%
   arrange(desc(mean_counts)) %>%
   slice(1:50) %>%
@@ -123,30 +124,30 @@ band_means %>%
 
 # Adding telomere insertion information ####
 
-# 1. colonne genomiche
+# 1. genomic columns
 genomic_cols <- colnames(TTAGGG_counts_tum_no_junction) %>%
-  setdiff("Sample")
+  setdiff('Sample')
 
-# 2. parse nome colonna -> chr + arm + banda
+# 2. parse the column name -> chr + arm + band
 col_info <- tibble(col = genomic_cols) %>%
-  separate(col, into = c("chr", "arm_band"), sep = "_", remove = FALSE) %>%
+  separate(col, into = c('chr', 'arm_band'), sep = '_', remove = FALSE) %>%
   mutate(
     arm = substr(arm_band, 1, 1),
     band = as.numeric(str_extract(arm_band, "\\d+\\.?\\d*"))
   )
 
-# 3. identifica bande terminali
+# 3. identify terminal bands
 terminal_cols <- col_info %>%
   group_by(chr, arm) %>%
   filter(band == max(band)) %>%
   pull(col)
 
-# 4. identifica bande outlier forti in base alla media
+# 4. identify strong outlier bands based on the mean
 outlier_cols <- band_means %>%
   filter(mean_counts > quantile(mean_counts, 0.95)) %>%
   pull(band)
 
-# highlight = colonne interessanti: no terminali MA outlier
+# highlight = columns of interest: non-terminal BUT outlier
 band_means_flag <- band_means %>%
   mutate(
     is_outlier = mean_counts > quantile(mean_counts, 0.95),
@@ -161,7 +162,7 @@ band_means_flag %>%
   ggplot(aes(x = reorder(band, mean_counts), y = log(mean_counts), fill = highlight, colour = is_outlier)) +
   geom_col() +
   coord_flip() +
-  scale_fill_manual(values = c("FALSE" = "grey70", "TRUE" = "red"))+
+  scale_fill_manual(values = c('FALSE' = 'grey70', 'TRUE' = 'red'))+
   scale_color_manual(values = c('FALSE' = 'grey70', 'TRUE' = 'blue'))
 
 # distribution of log(counts) highlight + terminal
@@ -171,32 +172,32 @@ band_means_flag %>%
   ggplot(aes(x = reorder(band, mean_counts), y = log(mean_counts), fill = highlight, colour = is_terminal)) +
   geom_col() +
   coord_flip() +
-  scale_fill_manual(values = c("FALSE" = "grey70", "TRUE" = "red"))+
+  scale_fill_manual(values = c('FALSE' = 'grey70', 'TRUE' = 'red'))+
   scale_color_manual(values = c('FALSE' = 'grey70', 'TRUE' = 'green'))
 
-# 5. scelta colonne
-# bande outlier non terminali
+# 5. column selection
+# non-terminal outlier bands
 highlighted_cols <- band_means_flag %>%
   filter(highlight) %>%
   pull(band)
 
-# highlighted ma da tenere (selezione manuale)
+# highlighted but kept (manual selection)
 keep_cols <- c(
-  "X9_q13", "X2_q21.2", "X9_p24.2", "X2_q13", "X2_p22.3",
-  "Y_q11.223", "X9_q34.11", "X_p22.11", "X5_p14.3",
-  "X8_q12.3", "X22_q11.21"
+  'X9_q13', 'X2_q21.2', 'X9_p24.2', 'X2_q13', 'X2_p22.3',
+  'Y_q11.223', 'X9_q34.11', 'X_p22.11', 'X5_p14.3',
+  'X8_q12.3', 'X22_q11.21'
 )
 
-# colonne finali da escludere: tutte le terminali + tutti gli highlighted NON presenti in keep_cols
+# final columns to exclude: all terminal bands + all highlighted ones NOT in keep_cols
 exclude_cols <- c(
   terminal_cols,
   setdiff(highlighted_cols, keep_cols)
 )
 
-# colonne da tenere per la somma finale
+# columns to keep for the final sum
 internal_cols <- setdiff(genomic_cols, exclude_cols)
 
-# 6. somma finale
+# 6. final sum
 tel_ins_dataset <- TTAGGG_counts_tum_no_junction %>% 
   mutate(tel_ins = rowSums(across(all_of(internal_cols)), na.rm = TRUE)) %>% 
   select(Sample, tel_ins, everything())
@@ -205,8 +206,8 @@ tel_ins_dataset <- TTAGGG_counts_tum_no_junction %>%
 
 # New tel_ins column ####
 tel_ins_dataset_join <- tel_ins_dataset %>% 
-  mutate(patient_code = str_remove(Sample, "^tumor_"),
-         patient_code = str_remove(patient_code, "-.*$")
+  mutate(patient_code = str_remove(Sample, '^tumor_'),
+         patient_code = str_remove(patient_code, '-.*$')
          ) %>% 
   select(patient_code, tel_ins)
 
@@ -235,7 +236,6 @@ drivers_new %>%
 
 # Blood TF rate primary ####
 ## Load datasets####
-library(here)
 primary_data <- readxl::read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 clean_pr_data <- clean_pcawg_data(primary_data)
 blood_data <- readxl::read_xlsx(here('data', 'raw', 'PCAWG_TF_rate_tumor_blood.xlsx'))
@@ -251,9 +251,6 @@ write_xlsx(primary_blood_data, here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 
 # Metastatic dataset + metadata ####
-library(writexl)
-library(here)
-library(tidyverse)
 df1 <- readxl::read_xlsx('data/raw/drivers.xlsx')
 source(here('scripts', 'clean_columns.R'))
 source(here('scripts', 'useful_functions.R'))
@@ -272,7 +269,7 @@ metastatic_full <- df1 %>%
 metastatic_full <- janitor::clean_names(metastatic_full)
 
 metastatic_full <- metastatic_full %>% 
-  rename_with(~ str_replace(.x, "^([a-z]{6})(?=_singleton)", toupper))
+  rename_with(~ str_replace(.x, '^([a-z]{6})(?=_singleton)', toupper))
 
 # Group similar columns together
 metastatic_full <- metastatic_full %>% 
@@ -370,18 +367,18 @@ total_reads_used_missing_df <- readr::read_csv(
   transmute(sample = patient_code, Total_reads_used = TOTAL_READS_USED)
 
 total_reads_used_df <- total_reads_used_df %>%
-  rows_patch(total_reads_used_missing_df, by = "sample", unmatched = "ignore") %>%
+  rows_patch(total_reads_used_missing_df, by = 'sample', unmatched = 'ignore') %>%
   bind_rows(
     total_reads_used_missing_df %>%
-      anti_join(total_reads_used_df, by = "sample")
+      anti_join(total_reads_used_df, by = 'sample')
   )
 
 singleton_patterns <- c(
-  "TCAGGG", "TGAGGG", "TTGGGG", "TTCGGG", "TTTGGG",
-  "ATAGGG", "CATGGG", "CTAGGG", "GTAGGG", "TAAGGG"
+  'TCAGGG', 'TGAGGG', 'TTGGGG', 'TTCGGG', 'TTTGGG',
+  'ATAGGG', 'CATGGG', 'CTAGGG', 'GTAGGG', 'TAAGGG'
 )
-singleton_norm_cols <- paste0(singleton_patterns, "_singletons_norm_by_all_reads")
-singleton_dist_cols <- paste0(singleton_patterns, "_singleton_dist")
+singleton_norm_cols <- paste0(singleton_patterns, '_singletons_norm_by_all_reads')
+singleton_dist_cols <- paste0(singleton_patterns, '_singleton_dist')
 singleton_rel_tol <- 5e-3
 
 # add patient code
@@ -402,22 +399,22 @@ met_red_edit_pat_code <- met_red_edit %>%
 
 # Step 1: tumor & control singleton norms + tel_content per matched pair (keyed by tumor_code).
 singleton_dist_long <- th_singleton_results %>%
-  mutate(tumor_code = str_remove(PID, "-.*$")) %>%
+  mutate(tumor_code = str_remove(PID, '-.*$')) %>%
   select(PID, tumor_code, sample, total_reads, tel_content, all_of(singleton_norm_cols)) %>%
   pivot_longer(
     cols = all_of(singleton_norm_cols),
-    names_to = "singleton_col",
-    values_to = "singleton_norm"
+    names_to = 'singleton_col',
+    values_to = 'singleton_norm'
   ) %>%
-  mutate(pattern = str_remove(singleton_col, "_singletons_norm_by_all_reads$")) %>%
+  mutate(pattern = str_remove(singleton_col, '_singletons_norm_by_all_reads$')) %>%
   group_by(tumor_code, pattern) %>%
   summarise(
-    norm_tumor          = first(na.omit(singleton_norm[sample == "tumor"])),
-    norm_control        = first(na.omit(singleton_norm[sample == "control"])),
-    total_reads_tumor   = first(na.omit(total_reads[sample == "tumor"])),
-    tel_content_tumor   = first(na.omit(tel_content[sample == "tumor"])),
-    tel_content_control = first(na.omit(tel_content[sample == "control"])),
-    .groups = "drop"
+    norm_tumor          = first(na.omit(singleton_norm[sample == 'tumor'])),
+    norm_control        = first(na.omit(singleton_norm[sample == 'control'])),
+    total_reads_tumor   = first(na.omit(total_reads[sample == 'tumor'])),
+    tel_content_tumor   = first(na.omit(tel_content[sample == 'tumor'])),
+    tel_content_control = first(na.omit(tel_content[sample == 'control'])),
+    .groups = 'drop'
   )
 
 # Step 2: sanity check the join at the RAW-COUNT level. The metastatic table stores tumor
@@ -428,12 +425,12 @@ tumor_singleton_check <- met_red_edit_pat_code %>%
   select(patient_id, patient_code, all_of(singleton_norm_cols)) %>%
   pivot_longer(
     cols = all_of(singleton_norm_cols),
-    names_to = "singleton_col",
-    values_to = "singleton_norm_existing"
+    names_to = 'singleton_col',
+    values_to = 'singleton_norm_existing'
   ) %>%
-  mutate(pattern = str_remove(singleton_col, "_singletons_norm_by_all_reads$")) %>%
+  mutate(pattern = str_remove(singleton_col, '_singletons_norm_by_all_reads$')) %>%
   left_join(total_reads_used_df %>% select(patient_code = sample, wgs = Total_reads_used),
-            by = "patient_code") %>%
+            by = 'patient_code') %>%
   left_join(
     singleton_dist_long %>% select(tumor_code, pattern, norm_tumor, total_reads_tumor),
     by = join_by(patient_code == tumor_code, pattern)
@@ -455,8 +452,8 @@ failed_singleton_patients <- tumor_singleton_check %>%
   )
 
 if (nrow(failed_singleton_patients) > 0) {
-  warning("TH-native tumor singleton norms disagree with the metastatic table for ",
-          nrow(failed_singleton_patients), " patient(s); inspect failed_singleton_patients.")
+  warning('TH-native tumor singleton norms disagree with the metastatic table for ',
+          nrow(failed_singleton_patients), ' patient(s); inspect failed_singleton_patients.')
   print(failed_singleton_patients)
 }
 
@@ -472,7 +469,7 @@ singleton_dist_df <- singleton_dist_long %>%
       NA_real_,
       log2(norm_tumor / norm_control) - log2(tel_content_tumor / tel_content_control)
     ),
-    singleton_dist_col = paste0(pattern, "_singleton_dist")
+    singleton_dist_col = paste0(pattern, '_singleton_dist')
   ) %>%
   select(tumor_code, singleton_dist_col, singleton_dist) %>%
   pivot_wider(names_from = singleton_dist_col, values_from = singleton_dist)
@@ -485,7 +482,7 @@ total_reads_used <- met_red_edit_pat_code %>%
 # Extract tumor intrachromosomal reads from TH2, keyed by patient code
 intrachrom_df <- th2_results %>%
   filter(sample == 'tumor') %>%
-  mutate(patient_code = str_remove(PID, "-.*$"))
+  mutate(patient_code = str_remove(PID, '-.*$'))
 
 # Assemble final table: intrachromosomal reads + singleton distances + normalization
 met_intrachrom <- total_reads_used %>%
@@ -496,7 +493,6 @@ met_intrachrom <- total_reads_used %>%
   relocate(intrachrom_reads_total_reads, .before = intratel_reads_total_reads) %>% 
   relocate(any_of(singleton_dist_cols), .after = TAAGGG_singletons_norm_by_all_reads) %>%
   select(where(~ !all(is.na(.))), -patient_code, -Total_reads_used, -intrachromosomal_reads, -CATGGG_singletons_norm_by_all_reads, -CATGGG_singleton_dist)
-library(writexl)
 write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
 
 
@@ -517,7 +513,7 @@ mesenchymal_grouping_prim <- data %>%
     )
   )
 
-write_xlsx(mesenchymal_grouping, here('data', 'processed', 'PCAWG_primary.xlsx'))
+write_xlsx(mesenchymal_grouping_prim, here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 
 ## Metastatic ####
@@ -571,8 +567,8 @@ other_long <- genes_raw %>%
 genes_long <- bind_rows(tert_long, other_long) %>%
   distinct(sample, mut_col)
 
-# All samples present in the genes dataset: used to distinguish "no mutation found"
-# (FALSE) from "sample not in genes dataset" (NA) after the join.
+# All samples present in the genes dataset: used to distinguish 'no mutation found'
+# (FALSE) from 'sample not in genes dataset' (NA) after the join.
 genes_samples <- genes_raw %>% distinct(sample = `sample...1`)
 
 genes_wide <- genes_long %>%
@@ -617,7 +613,6 @@ missing_from_genes <- data_primary_genes %>%
 cat('Primary samples absent from genes dataset (n =', length(missing_from_genes), '):\n')
 print(missing_from_genes)
 
-library(writexl)
 write_xlsx(data_primary_genes, here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
 
 

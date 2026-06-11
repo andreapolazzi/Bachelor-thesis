@@ -36,7 +36,7 @@ data_analysis <- clean_data %>%
 ```{r visualize}
 cat("=== MISSINGNESS OVERVIEW ===\n")
 print(naniar::miss_var_summary(clean_data))
-cat("\nTERT NA:", round(sum(is.na(clean_data$TERT_FPKM))/nrow(clean_data)*100, 1), "%\n")
+cat("\nTERT NA:', round(sum(is.na(clean_data$TERT_FPKM))/nrow(clean_data)*100, 1), '%\n")
 
 cat('=== MISSING DATA HEATMAP ===\n')
 vis_miss(clean_data, sort_miss = TRUE)
@@ -46,7 +46,7 @@ clean_data %>%
                                 levels = c('TRUE', 'FALSE'),
                                 labels = c('Missing', 'Not Missing'))) %>% 
   ggplot(aes(x = alt_status, fill = missing_tert))+
-  geom_histogram(position = 'stack', stat = 'count')+
+  geom_bar(position = 'stack')+
   labs(title = 'Distribution of ALT status for Missing vs. Non-Missing',
        x = 'ALT status',
        y = 'Counts',
@@ -75,19 +75,19 @@ clean_data %>%
 ```{r distributions-comparison}
 cat("\n=== Comparison TERT Present vs Missing ===\n")
  
-# Seleziona variabili numeriche e categoriche rilevanti
-numeric_vars <- c("tf_rate", "telomere_insertion_rate", 
-                  "telomere_content_log2", "TERT_FPKM",
-                  "ATAGGG_singleton_dist", "CTAGGG_singleton_dist", 
-                  "GTAGGG_singleton_dist", "TAAGGG_singleton_dist",
-                  "TCAGGG_singleton_dist", "TGAGGG_singleton_dist",
-                  "TTCGGG_singleton_dist", "TTGGGG_singleton_dist",
-                  "TTTGGG_singleton_dist")
+# Select the relevant numeric and categorical variables
+numeric_vars <- c('tf_rate', 'telomere_insertion_rate', 
+                  'telomere_content_log2', 'TERT_FPKM',
+                  'ATAGGG_singleton_dist', 'CTAGGG_singleton_dist', 
+                  'GTAGGG_singleton_dist', 'TAAGGG_singleton_dist',
+                  'TCAGGG_singleton_dist', 'TGAGGG_singleton_dist',
+                  'TTCGGG_singleton_dist', 'TTGGGG_singleton_dist',
+                  'TTTGGG_singleton_dist')
  
-# Filtra solo variabili numeriche che esistono nel dataset
+# Keep only numeric variables that exist in the dataset
 numeric_vars <- numeric_vars[numeric_vars %in% names(clean_data)]
  
-# Confronto per variabili numeriche
+# Comparison across numeric variables
 comparison_numeric <- data_analysis %>%
   group_by(tert_missing_indicator) %>%
   summarise(
@@ -95,25 +95,25 @@ comparison_numeric <- data_analysis %>%
     across(all_of(numeric_vars), list(mean = ~mean(., na.rm = TRUE),
                                        sd = ~sd(., na.rm = TRUE),
                                        median = ~median(., na.rm = TRUE)),
-           .names = "{.col}_{.fn}")
+           .names = '{.col}_{.fn}')
   )
  
-# Presenta in formato più leggibile
+# Present in a more readable format
 for (var in numeric_vars) {
-  cat("---", var, "---\n")
+  cat('---', var, "---\n")
   
   tert_present <- clean_data[[var]][!is.na(clean_data$TERT_FPKM)]
   tert_missing <- clean_data[[var]][is.na(clean_data$TERT_FPKM)]
   
-  cat("TERT Present  | Mean:", round(mean(tert_present, na.rm=T), 4),
-      "| SD:", round(sd(tert_present, na.rm=T), 4),
-      "| Median:", round(median(tert_present, na.rm=T), 4), "\n")
-  cat("TERT Missing  | Mean:", round(mean(tert_missing, na.rm=T), 4),
-      "| SD:", round(sd(tert_missing, na.rm=T), 4),
-      "| Median:", round(median(tert_missing, na.rm=T), 4), "\n\n")
+  cat('TERT Present  | Mean:', round(mean(tert_present, na.rm=T), 4),
+      '| SD:', round(sd(tert_present, na.rm=T), 4),
+      '| Median:', round(median(tert_present, na.rm=T), 4), "\n")
+  cat('TERT Missing  | Mean:', round(mean(tert_missing, na.rm=T), 4),
+      '| SD:', round(sd(tert_missing, na.rm=T), 4),
+      '| Median:', round(median(tert_missing, na.rm=T), 4), "\n\n")
 }
  
-# Confronto per cancer_type
+# Comparison by cancer_type
 cat("\n--- cancer_type ---\n")
 comparison_cancer <- data_analysis %>%
   group_by(cancer_type, tert_missing_indicator) %>%
@@ -128,7 +128,7 @@ comparison_cancer <- data_analysis %>%
 cat("TERT Missing % by Cancer Type:\n")
 print(comparison_cancer, n = nrow(comparison_cancer))
 
-# Confronto per alt_staus
+# Comparison by alt_status
 cat("\n--- alt_status ---\n")
 comparison_alt <- data_analysis %>%
   group_by(alt_status, tert_missing_indicator) %>%
@@ -140,6 +140,6 @@ comparison_alt <- data_analysis %>%
   ) %>%
   arrange(desc(pct_missing))
  
-cat("TERT Missing % by Cancer Type:\n")
+cat("TERT Missing % by ALT status:\n")
 print(comparison_alt, n = nrow(comparison_alt))
 ```

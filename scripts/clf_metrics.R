@@ -1,10 +1,10 @@
 # Shared classification fold metrics for the ALT-status notebooks (10, 20).
 #
 #   avg_precision(score, y_bin) : area under the precision-recall curve
-#                                 (sklearn "average precision"); the honest summary
+#                                 (sklearn 'average precision'); the honest summary
 #                                 metric under heavy class imbalance.
 #   fold_metrics(prob, truth)   : one row of per-fold metrics. `truth` is a factor
-#                                 with levels c("ALT-low", "ALT-high"); thresholded
+#                                 with levels c('ALT-low', 'ALT-high'); thresholded
 #                                 metrics use 0.5 with positive = ALT-high.
 
 library(pROC)
@@ -22,9 +22,9 @@ avg_precision <- function(score, y_bin) {
 }
 
 fold_metrics <- function(prob, truth) {
-  yb   <- as.integer(truth == "ALT-high")
-  ro   <- roc(truth, prob, levels = c("ALT-low", "ALT-high"),
-              direction = "<", quiet = TRUE)
+  yb   <- as.integer(truth == 'ALT-high')
+  ro   <- roc(truth, prob, levels = c('ALT-low', 'ALT-high'),
+              direction = '<', quiet = TRUE)
   pred <- prob >= 0.5
   tp <- sum(pred  & yb == 1); fp <- sum(pred  & yb == 0)
   tn <- sum(!pred & yb == 0); fn <- sum(!pred & yb == 1)
