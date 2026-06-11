@@ -1,0 +1,272 @@
+{
+  "/Users/andreapolazzi/Desktop/CBM/project/.claude/settings.local.json": {
+    "mtime": 1780414286.354439,
+    "ast_hash": "d6062dc7e2d297f650609662afc69030",
+    "semantic_hash": "d6062dc7e2d297f650609662afc69030"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/datasets_summary.R": {
+    "mtime": 1776266651.2684925,
+    "ast_hash": "dc2b93b31e467fe105c6a333f9b110d7",
+    "semantic_hash": "dc2b93b31e467fe105c6a333f9b110d7"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/SHAP_tabpfn_local.py": {
+    "mtime": 1780933603.589154,
+    "ast_hash": "9b589280ab488066bc0ffa79b4f354a8",
+    "semantic_hash": "9b589280ab488066bc0ffa79b4f354a8"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/check_tumor_group_discordance.R": {
+    "mtime": 1780490046.277903,
+    "ast_hash": "bb557908f55308f617022c3eed04c363",
+    "semantic_hash": "bb557908f55308f617022c3eed04c363"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/clean_columns.R": {
+    "mtime": 1776329549.181847,
+    "ast_hash": "cb33f49c5a0a0f26a111cf302c29c220",
+    "semantic_hash": "cb33f49c5a0a0f26a111cf302c29c220"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/clf_metrics.R": {
+    "mtime": 1781001627.5794625,
+    "ast_hash": "6c9fdda0cf0dec6726697ce48e737aec",
+    "semantic_hash": "6c9fdda0cf0dec6726697ce48e737aec"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/diag_recontext.py": {
+    "mtime": 1780575609.6842852,
+    "ast_hash": "d4a26d3b59b6b5f45b8d8bd82fd5622e",
+    "semantic_hash": "d4a26d3b59b6b5f45b8d8bd82fd5622e"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/export_cv_inputs.R": {
+    "mtime": 1781005296.8916233,
+    "ast_hash": "615c7f3d676e4ba69b7a784e0f89d996",
+    "semantic_hash": "615c7f3d676e4ba69b7a784e0f89d996"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/ggplot.R": {
+    "mtime": 1773675683.5113301,
+    "ast_hash": "ca07f8513054ae54b89ce82a70d9508d",
+    "semantic_hash": "ca07f8513054ae54b89ce82a70d9508d"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/make_folds.R": {
+    "mtime": 1781003580.581228,
+    "ast_hash": "4f8bc6b0d142e57907255e2a6fe773c1",
+    "semantic_hash": "4f8bc6b0d142e57907255e2a6fe773c1"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/missing_data.R": {
+    "mtime": 1774097098.930989,
+    "ast_hash": "c8befa43f8e038d6f92632aad02d3366",
+    "semantic_hash": "c8befa43f8e038d6f92632aad02d3366"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/process_raw_data.R": {
+    "mtime": 1781086840.3729053,
+    "ast_hash": "ad4bca103c4aeab382a50f3a3d4dd823",
+    "semantic_hash": "ad4bca103c4aeab382a50f3a3d4dd823"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/reconstruct_shapviz.R": {
+    "mtime": 1780933706.7478168,
+    "ast_hash": "c451057ce2b592b69c4846ed128f2699",
+    "semantic_hash": "c451057ce2b592b69c4846ed128f2699"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/reg_metrics.R": {
+    "mtime": 1781003586.6821196,
+    "ast_hash": "d0e7dc0356aad6c2b48f16ac48c3d484",
+    "semantic_hash": "d0e7dc0356aad6c2b48f16ac48c3d484"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_shap_both.sh": {
+    "mtime": 1780398394.277367,
+    "ast_hash": "a51b906a6f4bf9c3e3c107ecf994efd2",
+    "semantic_hash": "a51b906a6f4bf9c3e3c107ecf994efd2"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_shap_full.sh": {
+    "mtime": 1780576700.9275422,
+    "ast_hash": "ffa543eb836fc48bd63c17eccf79ea30",
+    "semantic_hash": "ffa543eb836fc48bd63c17eccf79ea30"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_shap_full2.sh": {
+    "mtime": 1780661812.1806533,
+    "ast_hash": "d4f2ee4c2459e19ae786e581e4ae794f",
+    "semantic_hash": "d4f2ee4c2459e19ae786e581e4ae794f"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_shap_imp_full2.sh": {
+    "mtime": 1780909734.059809,
+    "ast_hash": "65433dcb044595ef64dbf1dfb16c85cb",
+    "semantic_hash": "65433dcb044595ef64dbf1dfb16c85cb"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_shap_imputation_full.sh": {
+    "mtime": 1780396486.2007189,
+    "ast_hash": "176036fd019090c8821800b8932b5326",
+    "semantic_hash": "176036fd019090c8821800b8932b5326"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_shap_recontext_test.sh": {
+    "mtime": 1780396492.2440991,
+    "ast_hash": "5882fe6f201449bbe0844a8cb11e4c55",
+    "semantic_hash": "5882fe6f201449bbe0844a8cb11e4c55"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_shap_reg.sh": {
+    "mtime": 1780933750.458161,
+    "ast_hash": "9e376efa28b97bc55bc69f75b9ca2c52",
+    "semantic_hash": "9e376efa28b97bc55bc69f75b9ca2c52"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_shap_tests.sh": {
+    "mtime": 1780574580.9738553,
+    "ast_hash": "c5e52d2eb917edca97bae6202ee30b8a",
+    "semantic_hash": "c5e52d2eb917edca97bae6202ee30b8a"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_tabpfn_cv.sh": {
+    "mtime": 1781005320.8600101,
+    "ast_hash": "03502b86e6c9cc366e07faad50cafce8",
+    "semantic_hash": "03502b86e6c9cc366e07faad50cafce8"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/run_tabpfn_shap.py": {
+    "mtime": 1774871737.2676482,
+    "ast_hash": "a48d0fc3df621623a5d36aeded7634e8",
+    "semantic_hash": "a48d0fc3df621623a5d36aeded7634e8"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/tabpfn_cv_oof.py": {
+    "mtime": 1781005275.1379166,
+    "ast_hash": "4378946612eda0d9aa74cb531e016156",
+    "semantic_hash": "4378946612eda0d9aa74cb531e016156"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/test_oof_smoke.py": {
+    "mtime": 1780667483.225235,
+    "ast_hash": "412c325d2b9b20c7c24ed57a2f890637",
+    "semantic_hash": "412c325d2b9b20c7c24ed57a2f890637"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/tidyverse.R": {
+    "mtime": 1774636885.5268772,
+    "ast_hash": "77f0af52256857970f46dba91652bdb8",
+    "semantic_hash": "77f0af52256857970f46dba91652bdb8"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/useful_functions.R": {
+    "mtime": 1776678538.338809,
+    "ast_hash": "6d890d195f13e3a1d118146db45a432d",
+    "semantic_hash": "6d890d195f13e3a1d118146db45a432d"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/scripts/useful_plots.R": {
+    "mtime": 1780572385.4159977,
+    "ast_hash": "fba008ebf0f3c9f13fc84d8ee5a85531",
+    "semantic_hash": "fba008ebf0f3c9f13fc84d8ee5a85531"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/metastatic/6_TVRs_comparison.qmd": {
+    "mtime": 1781088170.1909502,
+    "ast_hash": "10eb8bd062253d2bc9ab5c0f942474bf",
+    "semantic_hash": "10eb8bd062253d2bc9ab5c0f942474bf"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/10_TabPFN.qmd": {
+    "mtime": 1781005888.8371153,
+    "ast_hash": "54851463a6ab7603a99cb0c712f16558",
+    "semantic_hash": "54851463a6ab7603a99cb0c712f16558"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/11_Boruta_feat_imp.qmd": {
+    "mtime": 1778234014.9746993,
+    "ast_hash": "813a2ca0027a82c5d72048fe4829202f",
+    "semantic_hash": "813a2ca0027a82c5d72048fe4829202f"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/12_dataset_balancing.qmd": {
+    "mtime": 1778234014.9760237,
+    "ast_hash": "ca3aa1f1624884265ee9239a0e414814",
+    "semantic_hash": "ca3aa1f1624884265ee9239a0e414814"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/13_1_tTF_regression_+blood.qmd": {
+    "mtime": 1779799504.6718194,
+    "ast_hash": "c10990846d252e2dc46527b0dc78c338",
+    "semantic_hash": "c10990846d252e2dc46527b0dc78c338"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/13_tTF_regression_primary.qmd": {
+    "mtime": 1778597566.7354035,
+    "ast_hash": "753617f567dc87b8a71fc3613ad09d35",
+    "semantic_hash": "753617f567dc87b8a71fc3613ad09d35"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/14_TERT_missingness.qmd": {
+    "mtime": 1776678795.912363,
+    "ast_hash": "b2115b6d6403ea8ba6144871687b275b",
+    "semantic_hash": "b2115b6d6403ea8ba6144871687b275b"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/15_1_bTF_regression_+tumor.qmd": {
+    "mtime": 1778687538.9228966,
+    "ast_hash": "c9c55f0590f174a2233492ea0e635f0a",
+    "semantic_hash": "c9c55f0590f174a2233492ea0e635f0a"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/15_bTF_regression_primary.qmd": {
+    "mtime": 1778597566.7850137,
+    "ast_hash": "1e5cbf476573b01b2a214b31d3e1eb1a",
+    "semantic_hash": "1e5cbf476573b01b2a214b31d3e1eb1a"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/16_tTF_regression_noTERT.qmd": {
+    "mtime": 1778687538.9235368,
+    "ast_hash": "63f02924d9e1146b4d23e0d264e675b1",
+    "semantic_hash": "63f02924d9e1146b4d23e0d264e675b1"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/17_bTF_regression_noTERT.qmd": {
+    "mtime": 1778687538.9240792,
+    "ast_hash": "986637bdd19696a1593748c5a530b0f1",
+    "semantic_hash": "986637bdd19696a1593748c5a530b0f1"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/18_ALT_status_genes.qmd": {
+    "mtime": 1780573862.4216754,
+    "ast_hash": "7034fa7c6ce96221b00b30b784b87e79",
+    "semantic_hash": "7034fa7c6ce96221b00b30b784b87e79"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/19_ALT_status_blood_TF.qmd": {
+    "mtime": 1779724656.0301182,
+    "ast_hash": "a610d530ae29629cdb21789d56986632",
+    "semantic_hash": "a610d530ae29629cdb21789d56986632"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/20_classification_comparison.qmd": {
+    "mtime": 1781003800.5202029,
+    "ast_hash": "708e4d55e53ea72788de6a129036cdee",
+    "semantic_hash": "708e4d55e53ea72788de6a129036cdee"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/21_regression_comparison.qmd": {
+    "mtime": 1781003874.2617838,
+    "ast_hash": "592f5b2c53b7ef3363892fa9e9d7714b",
+    "semantic_hash": "592f5b2c53b7ef3363892fa9e9d7714b"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/TF-blood_vs_primary.qmd": {
+    "mtime": 1779787743.2566316,
+    "ast_hash": "6b22a4ab33bfd3d2d796912d31d4b92c",
+    "semantic_hash": "6b22a4ab33bfd3d2d796912d31d4b92c"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/features_distribution.qmd": {
+    "mtime": 1781097888.9608364,
+    "ast_hash": "fb4d033571ec584d93133e5e606f5adb",
+    "semantic_hash": "fb4d033571ec584d93133e5e606f5adb"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/mesenchymal_groups.qmd": {
+    "mtime": 1781093548.3511488,
+    "ast_hash": "2dea10c7f34d6b12ad7f305a8c4de81d",
+    "semantic_hash": "2dea10c7f34d6b12ad7f305a8c4de81d"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/docs/superpowers/plans/2026-06-05-blood-inclusive-oof-shap.md": {
+    "mtime": 1780661649.2804809,
+    "ast_hash": "9578af9de97b43fc8357ef7c7e9552ec",
+    "semantic_hash": "9578af9de97b43fc8357ef7c7e9552ec"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/docs/superpowers/specs/2026-06-05-blood-inclusive-oof-shap-design.md": {
+    "mtime": 1780668124.3553052,
+    "ast_hash": "923894b0ae69e941a01561f05d12d31d",
+    "semantic_hash": "923894b0ae69e941a01561f05d12d31d"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/docs/superpowers/specs/2026-06-08-regression-oof-shap-design.md": {
+    "mtime": 1780933385.0857444,
+    "ast_hash": "7c93eb9b2476f15ac83ae7ed4726d324",
+    "semantic_hash": "7c93eb9b2476f15ac83ae7ed4726d324"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/primary/TF-blood_vs_primary.pdf": {
+    "mtime": 1780323142.0065374,
+    "ast_hash": "8aa10d681d73e0f36185d7565c85361a",
+    "semantic_hash": "8aa10d681d73e0f36185d7565c85361a"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/figures/tabpfn_shap1.png": {
+    "mtime": 1774620298.902418,
+    "ast_hash": "1ef485cbe8cd8614f2af8e09b058125a",
+    "semantic_hash": "1ef485cbe8cd8614f2af8e09b058125a"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/figures/tabpfn_shap2.png": {
+    "mtime": 1774620359.4164827,
+    "ast_hash": "f2a688a204dcc00f9028a223493f703d",
+    "semantic_hash": "f2a688a204dcc00f9028a223493f703d"
+  },
+  "/Users/andreapolazzi/Desktop/CBM/project/analysis/figures/tabpfn_shap3.png": {
+    "mtime": 1774620360.8417752,
+    "ast_hash": "e48a3037c68ad7643a6102c1e91ec252",
+    "semantic_hash": "e48a3037c68ad7643a6102c1e91ec252"
+  }
+}

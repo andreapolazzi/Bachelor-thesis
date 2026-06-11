@@ -121,72 +121,72 @@ if (!file.exists(oof_csv)) {
 }
 ```
 
-# Interpretability
+# Interpretability (ALT status — out-of-fold SHAP, HPC)
 
 ## SHAP plots
 
-```{r shap-images, out.width='85%'}
-shap_files <- here(
-  "analysis",
-  "figures",
-  c("tabpfn_shap1.png", "tabpfn_shap2.png", "tabpfn_shap3.png")
-)
-
-existing_files <- shap_files[file.exists(shap_files)]
-
-if (length(existing_files) == 0) {
-  cat("No SHAP images found in analysis/figures/.")
-} else {
-  knitr::include_graphics(existing_files)
-}
-```
-
 ```{r tabpfn-shap-hpc-test}
 source(here('scripts', 'reconstruct_shapviz.R'))
+# rank01() and recolor_by_rank() are defined in reconstruct_shapviz.R (sourced above)
 
-# per-feature rank, scaled to [0,1], NA-safe
-rank01 <- function(x) {
-  n <- sum(!is.na(x))
-  (rank(x, na.last = "keep", ties.method = "average") - 1) / (n - 1)
-}
-
-recolor_by_rank <- function(sv) {
-  X_rank <- as.data.frame(lapply(get_feature_values(sv), rank01))
-  shapviz(object   = get_shap_values(sv),
-          X        = X_rank,
-          baseline = get_baseline(sv))
-}
-
+sv_imp_rank <- recolor_by_rank(sv_imp)
+sv_rec_rank <- recolor_by_rank(sv_rec)
 sv_imp2_rank <- recolor_by_rank(sv_imp2)
 sv_rec2_rank <- recolor_by_rank(sv_rec2)
 
 # Imputation, single split train/test
-sv_importance(sv_imp, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
-sv_dependence(sv_imp, v = 'telomere_insertion_rate', color_var = 'tf_rate')
-sv_dependence(sv_imp, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
-sv_dependence(sv_imp, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
-sv_dependence(sv_imp, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
+# sv_importance(sv_imp_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
+# sv_dependence(sv_imp_rank, v = 'telomere_insertion_rate', color_var = 'tf_rate')
+# sv_dependence(sv_imp_rank, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
+# sv_dependence(sv_imp_rank, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
+# sv_dependence(sv_imp_rank, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
 
 # Imputation, 5-fold CV
-sv_importance(sv_imp2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
-sv_dependence(sv_imp2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate')
-sv_dependence(sv_imp2_rank, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
-sv_dependence(sv_imp2_rank, v = "tf_primary_rate",         color_var = "telomere_content_log2") + theme_bw()
-sv_dependence(sv_imp2_rank, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
-
+# beeswarm has no per-point shape (it stacks all 14 features); shape lives on the
+# dependence plots, where alt_status (the target) is mapped via sv_dependence_shape().
+sv_importance(sv_imp2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8) + theme_bw()
+sv_dependence_shape(sv_imp2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate',
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_imp2_rank, v = "telomere_content_log2", color_var = "TERT_FPKM",
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_imp2_rank, v = "tf_primary_rate", color_var = "telomere_content_log2",
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_imp2_rank, v = "TERT_FPKM", color_var = "TTTGGG_singleton_dist",
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_imp2_rank, v = "TTTGGG_singleton_dist", color_var = "TERT_FPKM",
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_imp2_rank, v = "TGAGGG_singleton_dist", color_var = "telomere_insertion_rate",
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_imp2_rank, v = "tf_blood_rate", color_var = "tf_primary_rate",
+                    group = meta2$alt_status) + theme_bw()
 # Recontextualization, single split train/test
-sv_importance(sv_rec, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
-sv_dependence(sv_rec, v = 'telomere_insertion_rate', color_var = 'tf_rate')
-sv_dependence(sv_rec, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
-sv_dependence(sv_rec, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
-sv_dependence(sv_rec, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
+# sv_importance(sv_rec_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
+# sv_dependence(sv_rec_rank, v = 'telomere_insertion_rate', color_var = 'tf_rate')
+# sv_dependence(sv_rec_rank, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
+# sv_dependence(sv_rec_rank, v = "tf_rate",         color_var = "telomere_content_log2") + theme_bw()
+# sv_dependence(sv_rec_rank, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
 
-# Imputation, 5-fold CV
-sv_importance(sv_rec2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)
-sv_dependence(sv_rec2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate')
-sv_dependence(sv_rec2_rank, v = "telomere_content_log2", color_var = "TERT_FPKM") + theme_bw()
-sv_dependence(sv_rec2_rank, v = "tf_primary_rate",         color_var = "telomere_content_log2") + theme_bw()
-sv_dependence(sv_rec2_rank, v = "TERT_FPKM",             color_var = "TTTGGG_singleton_dist") + theme_bw()
+# Recontextualization, 5-fold CV
+sv_importance(sv_rec2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate',
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_top(sv_rec2_rank, v = "telomere_insertion_rate", group = meta2$cancer_type, top_n = 20, shape_group = meta2$alt_status) + theme_bw()
+sv_dependence_mes(sv_rec2_rank, v = "telomere_insertion_rate", group = meta2$cancer_group, shape_group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = "telomere_content_log2", color_var = "tf_primary_rate",
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = "tf_primary_rate", color_var = "telomere_insertion_rate", group = meta2$alt_status) + theme_bw()
+
+sv_dependence_top(sv_rec2_rank, v = "tf_primary_rate", group = meta2$cancer_type, top_n = 20,
+                  shape_group = meta2$alt_status) + theme_bw()
+sv_dependence_mes(sv_rec2_rank, v = "tf_primary_rate", group = meta2$cancer_group, shape_group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = "TERT_FPKM", color_var = "TTTGGG_singleton_dist",
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = "TTTGGG_singleton_dist", color_var = "TERT_FPKM",
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = "TGAGGG_singleton_dist", color_var = "telomere_insertion_rate",
+                    group = meta2$alt_status) + theme_bw()
+sv_dependence_shape(sv_rec2_rank, v = "tf_blood_rate", color_var = "tf_primary_rate",
+                    group = meta2$alt_status) + theme_bw()
 ```
 
 ------------------------------------------------------------------------
@@ -297,8 +297,47 @@ if (!shap_ttf_ready) {
   sv_ttf_rec <- load_shap(here('outputs', 'shap_output_ttf_rec'))    # recontext target space
   meta_ttf   <- load_meta(shap_ttf_imp_dir)
 
-  sv_importance(sv_ttf_imp, kind = 'both')
-  sv_waterfall(sv_ttf_imp, row_id = 1)
+  # rank-average normalization (same as the ALT-status SHAP plots): beeswarm
+  # colors and dependence axes use per-feature rank, robust to outliers/scale.
+  sv_ttf_imp_rank <- recolor_by_rank(sv_ttf_imp)
+  sv_ttf_rec_rank <- recolor_by_rank(sv_ttf_rec)
+
+  # --- imputation (additive, target log1p space) ---
+  # explicit print(): inside this if/else block only the last expression would
+  # auto-print, unlike a top-level chunk.
+  print(sv_importance(sv_ttf_imp_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8) + theme_bw())
+  
+  print(sv_dependence_shape(sv_ttf_imp_rank, v = 'tf_blood_rate', color_var = 'telomere_insertion_rate', group = meta_ttf$alt_status) + theme_bw())
+  
+  print(sv_dependence_shape(sv_ttf_imp_rank, v = 'telomere_insertion_rate', color_var = 'TTCGGG_singleton_dist', group = meta_ttf$alt_status) + theme_bw())
+  print(sv_dependence_top(sv_ttf_imp_rank, v = 'telomere_insertion_rate', group = meta_ttf$cancer_type, top_n = 20, shape_group = meta_ttf$alt_status) + theme_bw())
+  print(sv_dependence_mes(sv_ttf_imp_rank, v = 'telomere_insertion_rate', group = meta_ttf$cancer_group, shape_group = meta_ttf$alt_status) + theme_bw())
+
+  print(sv_dependence_shape(sv_ttf_imp_rank, v = 'TERT_FPKM', color_var = 'telomere_content_log2', group = meta_ttf$alt_status) + theme_bw())
+
+  print(sv_dependence_shape(sv_ttf_imp_rank, v = 'telomere_content_log2', color_var = 'telomere_insertion_rate', group = meta_ttf$alt_status) + theme_bw())
+  
+  print(sv_dependence_shape(sv_ttf_imp_rank, v = 'TTCGGG_singleton_dist', color_var = 'telomere_insertion_rate', group = meta_ttf$alt_status) + theme_bw())
+  print(sv_dependence_top(sv_ttf_imp_rank, v = 'TTCGGG_singleton_dist', group = meta_ttf$cancer_type, top_n = 20, shape_group = meta_ttf$alt_status) + theme_bw())
+  print(sv_dependence_mes(sv_ttf_imp_rank, v = 'TTCGGG_singleton_dist', group = meta_ttf$cancer_group, shape_group = meta_ttf$alt_status) + theme_bw())
+
+  # --- recontextualization (native target space cross-check) ---
+  print(sv_importance(sv_ttf_rec_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8) + theme_bw())
+  
+  print(sv_dependence_shape(sv_ttf_rec_rank, v = 'tf_blood_rate', color_var = 'telomere_insertion_rate', group = meta_ttf$alt_status) + theme_bw())
+  
+  print(sv_dependence_shape(sv_ttf_rec_rank, v = 'telomere_insertion_rate', color_var = 'TTCGGG_singleton_dist', group = meta_ttf$alt_status) + theme_bw())
+  print(sv_dependence_top(sv_ttf_rec_rank, v = 'telomere_insertion_rate', group = meta_ttf$cancer_type, top_n = 20, shape_group = meta_ttf$alt_status) + theme_bw())
+  print(sv_dependence_mes(sv_ttf_rec_rank, v = 'telomere_insertion_rate', group = meta_ttf$cancer_group, shape_group = meta_ttf$alt_status) + theme_bw())
+
+  print(sv_dependence_shape(sv_ttf_rec_rank, v = 'TERT_FPKM', color_var = 'telomere_content_log2', group = meta_ttf$alt_status) + theme_bw())
+  
+  print(sv_dependence_shape(sv_ttf_rec_rank, v = 'telomere_content_log2', color_var = 'telomere_insertion_rate', group = meta_ttf$alt_status) + theme_bw())
+  
+  print(sv_dependence_shape(sv_ttf_rec_rank, v = 'TTCGGG_singleton_dist', color_var = 'telomere_insertion_rate', group = meta_ttf$alt_status) + theme_bw())
+  print(sv_dependence_top(sv_ttf_rec_rank, v = 'TTCGGG_singleton_dist', group = meta_ttf$cancer_type, top_n = 20, shape_group = meta_ttf$alt_status) + theme_bw())
+  print(sv_dependence_mes(sv_ttf_rec_rank, v = 'TTCGGG_singleton_dist', group = meta_ttf$cancer_group, shape_group = meta_ttf$alt_status) + theme_bw())
+
 }
 ```
 
@@ -396,7 +435,39 @@ if (!shap_btf_ready) {
   sv_btf_rec <- load_shap(here('outputs', 'shap_output_btf_rec'))    # recontext target space
   meta_btf   <- load_meta(shap_btf_imp_dir)
 
-  sv_importance(sv_btf_imp, kind = 'both')
-  sv_waterfall(sv_btf_imp, row_id = 1)
+  # rank-average normalization (same as the ALT-status SHAP plots): beeswarm
+  # colors and dependence axes use per-feature rank, robust to outliers/scale.
+  sv_btf_imp_rank <- recolor_by_rank(sv_btf_imp)
+  sv_btf_rec_rank <- recolor_by_rank(sv_btf_rec)
+
+  # --- imputation (additive, target log1p space) ---
+  print(sv_importance(sv_btf_imp_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8)+ theme_bw())
+  
+  print(sv_dependence_shape(sv_btf_imp_rank, v = 'tf_primary_rate', color_var = 'telomere_content_log2', group = meta_btf$alt_status) + theme_bw())
+  print(sv_dependence_top(sv_btf_imp_rank, v = 'tf_primary_rate', group = meta_btf$cancer_type, top_n = 20, shape_group = meta_btf$alt_status) + theme_bw())
+  print(sv_dependence_mes(sv_btf_imp_rank, v = 'tf_primary_rate', group = meta_btf$cancer_group, shape_group = meta_btf$alt_status) + theme_bw())
+
+  print(sv_dependence_shape(sv_btf_imp_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate', group = meta_btf$alt_status) + theme_bw())
+  print(sv_dependence_top(sv_btf_imp_rank, v = 'telomere_insertion_rate', group = meta_btf$cancer_type, top_n = 20, shape_group = meta_btf$alt_status) + theme_bw())
+  print(sv_dependence_mes(sv_btf_imp_rank, v = 'telomere_insertion_rate', group = meta_btf$cancer_group, shape_group = meta_btf$alt_status) + theme_bw())
+
+  print(sv_dependence_shape(sv_btf_imp_rank, v = 'TERT_FPKM', color_var = 'telomere_content_log2', group = meta_btf$alt_status) + theme_bw())
+  
+  print(sv_dependence_shape(sv_btf_rec_rank, v = 'telomere_content_log2', color_var = 'tf_primary_rate', group = meta_btf$alt_status) + theme_bw())
+
+  # --- recontextualization (native target space cross-check) ---
+  print(sv_importance(sv_btf_rec_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8) + theme_bw())
+  
+  print(sv_dependence_shape(sv_btf_rec_rank, v = 'tf_primary_rate', color_var = 'telomere_content_log2', group = meta_btf$alt_status) + theme_bw())
+  print(sv_dependence_top(sv_btf_rec_rank, v = 'tf_primary_rate', group = meta_btf$cancer_type, top_n = 20, shape_group = meta_btf$alt_status) + theme_bw())
+  print(sv_dependence_mes(sv_btf_rec_rank, v = 'tf_primary_rate', group = meta_btf$cancer_group, shape_group = meta_btf$alt_status) + theme_bw())
+
+  print(sv_dependence_shape(sv_btf_rec_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate', group = meta_btf$alt_status) + theme_bw())
+  print(sv_dependence_top(sv_btf_rec_rank, v = 'telomere_insertion_rate', group = meta_btf$cancer_type, top_n = 20, shape_group = meta_btf$alt_status) + theme_bw())
+  print(sv_dependence_mes(sv_btf_rec_rank, v = 'telomere_insertion_rate', group = meta_btf$cancer_group, shape_group = meta_btf$alt_status) + theme_bw())
+
+  print(sv_dependence_shape(sv_btf_rec_rank, v = 'TERT_FPKM', color_var = 'telomere_content_log2', group = meta_btf$alt_status) + theme_bw())
+  
+  print(sv_dependence_shape(sv_btf_rec_rank, v = 'telomere_content_log2', color_var = 'tf_primary_rate', group = meta_btf$alt_status) + theme_bw())
 }
 ```

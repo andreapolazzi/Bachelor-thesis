@@ -72,6 +72,23 @@ continuous_vars <- setdiff(numeric_vars, singleton_vars)
 strata_levels <- c("overall", "ALT-low", "ALT-high")
 ```
 
+```{r tert-data, include=FALSE}
+df_tert <- data %>%
+  drop_na() %>%
+  filter(tf_primary_rate < 10) %>%
+  mutate(
+    tf_primary_rate         = log1p(tf_primary_rate),
+    tf_blood_rate           = log1p(tf_blood_rate),
+    telomere_insertion_rate = log1p(telomere_insertion_rate),
+    TERT_FPKM               = log1p(TERT_FPKM),
+    alt_status   = factor(alt_status, levels = c("ALT-low", "ALT-high")),
+    cancer_group = factor(cancer_group, levels = c(grp_non, grp_mes))
+  ) %>%
+  select(-donor_id, -cancer_type, -Specimen.Type.Summary)
+
+tert_numeric_vars <- c(numeric_vars, "TERT_FPKM")
+```
+
 ```{r grp-tests}
 # Master results table — every numeric feature × {overall, ALT-low, ALT-high}.
 # This is the single source of truth: plots show only the significance star,
@@ -162,6 +179,49 @@ grp_tests %>%
        subtitle = sprintf("Positive = higher in %s (n=%d vs %d).",
                           grp_mes, sum(df_group$cancer_group == grp_mes),
                           sum(df_group$cancer_group == grp_non)),
+       x = "Cliff's delta", y = NULL, fill = "Effect size") +
+  theme_bw()
+```
+
+## 1b. TERT-available subset (n = 816) — including TERT_FPKM
+
+Same ranking restricted to the n = 816 samples with TERT data, adding
+`TERT_FPKM` as a feature. BH correction is re-applied across all 14
+features in this subset.
+
+```{r overview-ranking-tert, fig.height=6}
+grp_tests_tert <- map_dfr(tert_numeric_vars, function(v) {
+  bind_rows(
+    one_test(df_tert, v, "overall"),
+    one_test(filter(df_tert, alt_status == "ALT-low"),  v, "ALT-low"),
+    one_test(filter(df_tert, alt_status == "ALT-high"), v, "ALT-high")
+  )
+}) %>%
+  group_by(stratum) %>%
+  mutate(p.adj = p.adjust(p, method = "BH")) %>%
+  ungroup() %>%
+  mutate(
+    stratum = factor(stratum, levels = strata_levels),
+    signif  = cut(p.adj, breaks = c(-Inf, 0.001, 0.01, 0.05, Inf),
+                  labels = c("***", "**", "*", "ns"))
+  )
+
+grp_tests_tert %>%
+  filter(stratum == "overall", !is.na(cliff_delta)) %>%
+  mutate(mag = cut(abs(cliff_delta), c(-Inf, 0.147, 0.33, 0.474, Inf),
+                   labels = c("negligible", "small", "medium", "large")),
+         feature = fct_reorder(var, abs(cliff_delta))) %>%
+  ggplot(aes(x = cliff_delta, y = feature, fill = mag)) +
+  geom_col(alpha = 0.85) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+  geom_vline(xintercept = c(-0.147, 0.147), linetype = "dotted", color = "grey60") +
+  geom_vline(xintercept = c(-0.33, 0.33),   linetype = "dotted", color = "grey60") +
+  scale_fill_manual(values = c(negligible = "grey80", small = "#fdcc8a",
+                               medium = "#fc8d59", large = "#d7301f"), drop = FALSE) +
+  labs(title = "Cliff's delta: Mesenchymal vs Non-Mesenchymal — TERT subset (n = 816)",
+       subtitle = sprintf("Positive = higher in %s (n=%d vs %d). Includes TERT_FPKM.",
+                          grp_mes, sum(df_tert$cancer_group == grp_mes),
+                          sum(df_tert$cancer_group == grp_non)),
        x = "Cliff's delta", y = NULL, fill = "Effect size") +
   theme_bw()
 ```
@@ -359,21 +419,6 @@ choice, effect-size metric, BH correction within each stratum — is
 identical to the rest of the notebook.
 
 ```{r tert-subset}
-# Build TERT subset: identical pipeline to setup/build-frame but with
-# TERT_FPKM retained, so only rows where TERT is non-NA survive drop_na().
-df_tert <- data %>%
-  drop_na() %>%
-  filter(tf_primary_rate < 10) %>%
-  mutate(
-    tf_primary_rate         = log1p(tf_primary_rate),
-    tf_blood_rate           = log1p(tf_blood_rate),
-    telomere_insertion_rate = log1p(telomere_insertion_rate),
-    TERT_FPKM               = log1p(TERT_FPKM),
-    alt_status   = factor(alt_status, levels = c("ALT-low", "ALT-high")),
-    cancer_group = factor(cancer_group, levels = c(grp_non, grp_mes))
-  ) %>%
-  select(-donor_id, -cancer_type, -Specimen.Type.Summary)
-
 cat(sprintf(
   "TERT subset: n = %d  (%s: %d, %s: %d)\n",
   nrow(df_tert),
@@ -490,6 +535,234 @@ cor_diff %>%
                        midpoint = 0, limits = c(-1, 1)) +
   labs(title = "Correlation structure difference",
        subtitle = sprintf("cor(%s) - cor(%s). Red = stronger in mesenchymal.", grp_mes, grp_non),
+       x = NULL, y = NULL, fill = "Δ cor") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        axis.text.y = element_text(size = 7))
+```
+
+## 6b. TERT-available subset (n = 816) — including TERT_FPKM
+
+```{r correlation-tert}
+cor_tert_mes <- df_tert %>% filter(cancer_group == grp_mes) %>%
+  select(all_of(tert_numeric_vars)) %>% cor(use = "pairwise.complete.obs")
+cor_tert_non <- df_tert %>% filter(cancer_group == grp_non) %>%
+  select(all_of(tert_numeric_vars)) %>% cor(use = "pairwise.complete.obs")
+cor_tert_diff <- cor_tert_mes - cor_tert_non
+
+cor_tert_diff_long <- cor_tert_diff %>%
+  as.data.frame() %>% rownames_to_column("feat1") %>%
+  pivot_longer(-feat1, names_to = "feat2", values_to = "diff") %>%
+  filter(feat1 < feat2) %>% arrange(desc(abs(diff)))
+
+cat("Top pairwise correlation differences — TERT subset (mes - non):\n")
+print(head(cor_tert_diff_long, 15))
+
+cor_tert_diff %>%
+  as.data.frame() %>% rownames_to_column("feat1") %>%
+  pivot_longer(-feat1, names_to = "feat2", values_to = "diff") %>%
+  ggplot(aes(x = feat1, y = feat2, fill = diff)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick",
+                       midpoint = 0, limits = c(-1, 1)) +
+  labs(title = "Correlation structure difference — TERT subset (n = 816)",
+       subtitle = sprintf("cor(%s) - cor(%s). Includes TERT_FPKM. Red = stronger in mesenchymal.", grp_mes, grp_non),
+       x = NULL, y = NULL, fill = "Δ cor") +
+  theme_bw() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),
+        axis.text.y = element_text(size = 7))
+```
+
+------------------------------------------------------------------------
+
+# 7. Metastatic dataset — Mesenchymal vs Non-Mesenchymal
+
+This section repeats the mesenchymal group comparison on the
+**metastatic cohort** (`metastatic_red_edit_mesenchymal`). Key
+differences from the primary analysis:
+
+-   Grouping variable is `tumor_origin` (Mesenchymal / Mix /
+    Non_mesenchymal). `Mix` patients are excluded to keep the binary
+    contrast.
+-   The dataset has multiple rows per patient (one per driver gene). It
+    is de-duplicated to **one row per patient** before analysis; TF
+    rates and singleton distances are patient-level constants.
+-   `alt_status`, `TERT_FPKM`, and `telomere_insertion_rate` are absent
+    — no ALT stratification and no TERT section.
+-   Column mapping: `tumor_tf_rate` → tTF, `blood_tf_rate` → bTF.
+
+```{r met-setup}
+met_raw <- readxl::read_xlsx(here('data', 'processed', 'metastatic_red_edit_mesenchymal.xlsx'))
+
+# One row per patient; exclude Mix
+met_data <- met_raw %>%
+  distinct(patient_id, .keep_all = TRUE) %>%
+  filter(tumor_origin %in% c("Mesenchymal", "Non_mesenchymal")) %>%
+  mutate(
+    tumor_tf_rate  = log1p(tumor_tf_rate),
+    blood_tf_rate  = log1p(blood_tf_rate),
+    cancer_group   = factor(tumor_origin, levels = c("Non_mesenchymal", "Mesenchymal"))
+  )
+
+met_mes <- "Mesenchymal"
+met_non <- "Non_mesenchymal"
+
+met_colors      <- setNames(c("grey60", "firebrick"),  c(met_non, met_mes))
+
+met_singleton_vars  <- grep("_singleton_dist$", names(met_data), value = TRUE)
+met_continuous_vars <- c("tumor_tf_rate", "blood_tf_rate")
+met_numeric_vars    <- c(met_continuous_vars, met_singleton_vars)
+
+cat(sprintf("Metastatic cohort (binary): n = %d  (%s: %d, %s: %d)\n",
+            nrow(met_data),
+            met_mes, sum(met_data$cancer_group == met_mes),
+            met_non, sum(met_data$cancer_group == met_non)))
+```
+
+```{r met-tests}
+one_test_met <- function(df, v) {
+  x <- df[[v]][df$cancer_group == met_mes]
+  y <- df[[v]][df$cancer_group == met_non]
+  delta <- tryCatch(suppressWarnings(effsize::cliff.delta(x, y)$estimate),
+                    error = function(e) NA_real_)
+  p <- tryCatch(suppressWarnings(wilcox.test(x, y)$p.value),
+                error = function(e) NA_real_)
+  tibble(var = v,
+         n_mes = length(x), n_non = length(y),
+         median_mes = median(x, na.rm = TRUE), median_non = median(y, na.rm = TRUE),
+         cliff_delta = delta, p = p)
+}
+
+met_tests <- map_dfr(met_numeric_vars, one_test_met, df = met_data) %>%
+  mutate(
+    p.adj  = p.adjust(p, method = "BH"),
+    signif = cut(p.adj, breaks = c(-Inf, 0.001, 0.01, 0.05, Inf),
+                 labels = c("***", "**", "*", "ns"))
+  )
+```
+
+## 7.1 Overview — Cliff's delta across all features
+
+```{r met-overview, fig.height=5}
+met_tests %>%
+  filter(!is.na(cliff_delta)) %>%
+  mutate(mag = cut(abs(cliff_delta), c(-Inf, 0.147, 0.33, 0.474, Inf),
+                   labels = c("negligible", "small", "medium", "large")),
+         feature = fct_reorder(var, abs(cliff_delta))) %>%
+  ggplot(aes(x = cliff_delta, y = feature, fill = mag)) +
+  geom_col(alpha = 0.85) +
+  geom_vline(xintercept = 0, linetype = "dashed", color = "grey40") +
+  geom_vline(xintercept = c(-0.147, 0.147), linetype = "dotted", color = "grey60") +
+  geom_vline(xintercept = c(-0.33, 0.33),   linetype = "dotted", color = "grey60") +
+  scale_fill_manual(values = c(negligible = "grey80", small = "#fdcc8a",
+                               medium = "#fc8d59", large = "#d7301f"), drop = FALSE) +
+  labs(title = "Cliff's delta: Mesenchymal vs Non-Mesenchymal — metastatic cohort",
+       subtitle = sprintf("Positive = higher in Mesenchymal (n=%d vs %d). BH-adjusted p.",
+                          sum(met_data$cancer_group == met_mes),
+                          sum(met_data$cancer_group == met_non)),
+       x = "Cliff's delta", y = NULL, fill = "Effect size") +
+  theme_bw()
+```
+
+## 7.2 tTF and bTF by group
+
+```{r met-continuous-table}
+met_tests %>%
+  filter(var %in% met_continuous_vars) %>%
+  transmute(feature = var, n_mes, n_non,
+            median_mes  = round(median_mes,  3),
+            median_non  = round(median_non,  3),
+            cliff_delta = round(cliff_delta, 3),
+            p     = signif(p, 3),
+            p.adj = signif(p.adj, 3),
+            signif) %>%
+  kable(caption = "tTF and bTF (log1p): Mesenchymal vs Non-Mesenchymal — metastatic cohort")
+```
+
+```{r met-continuous-plots, fig.height=4}
+for (v in met_continuous_vars) {
+  ann <- met_tests %>% filter(var == v)
+  p <- ggplot(met_data, aes(x = cancer_group, y = .data[[v]], fill = cancer_group)) +
+    geom_violin(alpha = 0.4, color = NA) +
+    geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.7) +
+    geom_jitter(width = 0.1, alpha = 0.15, size = 0.9) +
+    geom_text(data = ann, aes(x = 1.5, y = Inf, label = signif),
+              inherit.aes = FALSE, vjust = 1.5, size = 4.5) +
+    scale_fill_manual(values = met_colors) +
+    labs(title = sprintf("%s by cancer group — metastatic", v), x = NULL, y = v) +
+    theme_bw() + theme(legend.position = "none")
+  print(p)
+}
+```
+
+## 7.3 Tumor origin composition
+
+```{r met-origin-table}
+met_raw %>%
+  distinct(patient_id, .keep_all = TRUE) %>%
+  count(tumor_origin, primary_tumor_type) %>%
+  arrange(tumor_origin, desc(n)) %>%
+  kable(caption = "Tumor types by tumor_origin (all patients, including Mix)")
+```
+
+## 7.4 Singleton motifs by group
+
+```{r met-singleton-table}
+met_tests %>%
+  filter(var %in% met_singleton_vars) %>%
+  mutate(var = sub("_singleton_dist$", "", var)) %>%
+  transmute(feature = var, n_mes, n_non,
+            median_mes  = round(median_mes,  3),
+            median_non  = round(median_non,  3),
+            cliff_delta = round(cliff_delta, 3),
+            p     = signif(p, 3),
+            p.adj = signif(p.adj, 3),
+            signif) %>%
+  kable(caption = "Singleton motifs: Mesenchymal vs Non-Mesenchymal — metastatic cohort")
+```
+
+```{r met-singleton-plot, fig.height=8, fig.width=10}
+met_sing_long <- met_data %>%
+  select(cancer_group, all_of(met_singleton_vars)) %>%
+  pivot_longer(all_of(met_singleton_vars), names_to = "motif", values_to = "value") %>%
+  mutate(motif = factor(sub("_singleton_dist$", "", motif)))
+
+met_sing_annot <- met_tests %>%
+  filter(var %in% met_singleton_vars) %>%
+  mutate(motif = factor(sub("_singleton_dist$", "", var)))
+
+ggplot(met_sing_long, aes(x = cancer_group, y = value, fill = cancer_group)) +
+  geom_violin(alpha = 0.4, color = NA) +
+  geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.7) +
+  geom_jitter(width = 0.1, alpha = 0.4, size = 0.5) +
+  geom_text(data = met_sing_annot, aes(x = 1.5, y = Inf, label = signif),
+            inherit.aes = FALSE, vjust = 1.5, size = 4) +
+  facet_wrap(~ motif, ncol = 3, scales = "free_y") +
+  scale_fill_manual(values = met_colors) +
+  labs(title = "Singleton motifs by cancer group — metastatic cohort",
+       subtitle = "Mesenchymal in red. BH-adjusted Wilcoxon.",
+       x = NULL, y = "singleton_dist") +
+  theme_bw() + theme(legend.position = "none", strip.text = element_text(face = "bold"))
+```
+
+## 7.5 Correlation structure differences — metastatic
+
+```{r met-correlation}
+cor_met_mes <- met_data %>% filter(cancer_group == met_mes) %>%
+  select(all_of(met_numeric_vars)) %>% cor(use = "pairwise.complete.obs")
+cor_met_non <- met_data %>% filter(cancer_group == met_non) %>%
+  select(all_of(met_numeric_vars)) %>% cor(use = "pairwise.complete.obs")
+cor_met_diff <- cor_met_mes - cor_met_non
+
+cor_met_diff %>%
+  as.data.frame() %>% rownames_to_column("feat1") %>%
+  pivot_longer(-feat1, names_to = "feat2", values_to = "diff") %>%
+  ggplot(aes(x = feat1, y = feat2, fill = diff)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "steelblue", mid = "white", high = "firebrick",
+                       midpoint = 0, limits = c(-1, 1)) +
+  labs(title = "Correlation structure difference — metastatic cohort",
+       subtitle = "cor(Mesenchymal) - cor(Non_mesenchymal). Red = stronger in mesenchymal.",
        x = NULL, y = NULL, fill = "Δ cor") +
   theme_bw() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1, size = 7),

@@ -549,24 +549,26 @@ genes_raw <- genes_raw[-1, ]  # remove placeholder header row
 genes_of_interest <- c('ATRX', 'DAXX', 'TERT', 'TSC2', 'MEN1', 'MET', 'KRAS', 'VHL')
 gene_cols         <- c('ATRX_DAXX_trunc', 'TERT_mod', 'TSC2', 'MEN1', 'MET', 'KRAS', 'VHL')
 
-# ATRX/DAXX and TERT: flag only rows where TMM_associated_mut_summary matches the
-# expected class label. All other genes: flag by presence in the gene column.
-genes_long <- genes_raw %>%
-  filter(gene %in% genes_of_interest) %>%
-  select(sample = `sample...1`, gene, tmm = TMM_associated_mut_summary) %>%
-  mutate(
-    mut_col = case_when(
-      gene %in% c('ATRX', 'DAXX') ~ 'ATRX_DAXX_trunc',
-      gene == 'TERT'               ~ 'TERT_mod',
-      TRUE                         ~ gene
-    ),
-    present = case_when(
-      gene %in% c('ATRX', 'DAXX') ~ tmm == 'ATRX_DAXX_trunc',
-      gene == 'TERT'               ~ tmm == 'TERT_mod',
-      TRUE                         ~ TRUE
-    )
-  ) %>%
-  filter(present) %>%
+tert_tam_values <- c('TERT_amp', 'TERTp_mut', 'TERT_mult', 'TERTp_sv')
+
+# TERT_mod: scan tmm/tam across ALL rows — TERT may not appear in the gene column
+tert_long <- genes_raw %>%
+  select(sample = `sample...1`, tmm = TMM_associated_mut_summary, tam = telomerase_associated_mutations) %>%
+  filter(tmm == 'TERT_mod' | tam %in% tert_tam_values) %>%
+  distinct(sample) %>%
+  mutate(mut_col = 'TERT_mod')
+
+# ATRX/DAXX: any mutation kept (not all are truncating); other genes: flag by gene presence
+other_long <- genes_raw %>%
+  filter(gene %in% setdiff(genes_of_interest, 'TERT')) %>%
+  select(sample = `sample...1`, gene) %>%
+  mutate(mut_col = case_when(
+    gene %in% c('ATRX', 'DAXX') ~ 'ATRX_DAXX_trunc',
+    TRUE ~ gene
+  )) %>%
+  distinct(sample, mut_col)
+
+genes_long <- bind_rows(tert_long, other_long) %>%
   distinct(sample, mut_col)
 
 # All samples present in the genes dataset: used to distinguish "no mutation found"
@@ -585,12 +587,28 @@ genes_wide <- genes_long %>%
   mutate(across(all_of(gene_cols), ~ replace_na(.x, FALSE))) %>%
   select(sample, all_of(gene_cols))
 
+# TAM binary columns: one column per value in tert_tam_values
+tam_wide <- genes_raw %>%
+  select(sample = `sample...1`, tam = telomerase_associated_mutations) %>%
+  filter(tam %in% tert_tam_values) %>%
+  distinct(sample, tam) %>%
+  mutate(present = TRUE) %>%
+  pivot_wider(
+    id_cols     = sample,
+    names_from  = tam,
+    values_from = present,
+    values_fill = FALSE
+  ) %>%
+  right_join(genes_samples, by = 'sample') %>%
+  mutate(across(all_of(tert_tam_values), ~ replace_na(.x, FALSE)))
+
 # Join gene mutation columns to primary dataset.
 # Samples absent from the genes dataset retain NA (unknown), not FALSE (wild-type).
 data_primary <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 data_primary_genes <- data_primary %>%
-  left_join(genes_wide, by = join_by(donor_id == sample))
+  left_join(genes_wide, by = join_by(donor_id == sample)) %>%
+  left_join(tam_wide,   by = join_by(donor_id == sample))
 
 # Samples in primary but not in genes dataset
 missing_from_genes <- data_primary_genes %>%

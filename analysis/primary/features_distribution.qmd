@@ -71,6 +71,38 @@ p_ttf | p_btf
 
 The tTF rate shows a clear elevation in ALT-high samples, consistent with the recombination-driven mechanism generating aberrant junctions. The bTF rate is measured in matched blood samples and is expected to reflect baseline constitutional instability rather than tumour-specific ALT activity; any elevation in ALT-high cases would point to a systemic instability signal co-occurring with the ALT phenotype.
 
+## Stratified by cancer group
+
+```{r ttf-btf-by-origin, fig.width=10, fig.height=7}
+p_ttf_mes <- ggplot(
+  data |> filter(!is.na(tf_primary_rate), !is.na(cancer_group)),
+  aes(x = alt_status, y = log1p(tf_primary_rate), fill = alt_status)
+) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.25, size = 0.9) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif", label.x = 1.5) +
+  scale_fill_manual(values = alt_colors) +
+  facet_wrap(~ cancer_group) +
+  theme_bw() +
+  labs(x = NULL, y = "tTF rate (log1p)", title = "Tumor TF rate by ALT status") +
+  theme(legend.position = "none")
+
+p_btf_mes <- ggplot(
+  data |> filter(!is.na(tf_blood_rate), !is.na(cancer_group)),
+  aes(x = alt_status, y = log1p(tf_blood_rate), fill = alt_status)
+) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.25, size = 0.9) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif", label.x = 1.5) +
+  scale_fill_manual(values = alt_colors) +
+  facet_wrap(~ cancer_group) +
+  theme_bw() +
+  labs(x = NULL, y = "bTF rate (log1p)", title = "Blood TF rate by ALT status") +
+  theme(legend.position = "none")
+
+p_ttf_mes / p_btf_mes
+```
+
 # Main telomere features by ALT status
 
 ```{r main-features-boxplots, fig.width=13, fig.height=5}
@@ -81,6 +113,44 @@ p4 <- make_boxplot(data, "telomere_content_log2",   "Telomere Content (log2)",  
 
 (p1 | p2 | p3 | p4) +
   plot_annotation(title = "Main telomere features by ALT status")
+```
+
+## Stratified by cancer group
+
+```{r main-features-by-origin, fig.width=11, fig.height=10}
+data |>
+  filter(!is.na(cancer_group)) |>
+  select(alt_status, cancer_group,
+         tf_primary_rate, tf_blood_rate, telomere_insertion_rate, telomere_content_log2) |>
+  pivot_longer(c(tf_primary_rate, tf_blood_rate, telomere_insertion_rate, telomere_content_log2),
+               names_to = "feature", values_to = "value") |>
+  mutate(
+    value = case_when(
+      feature %in% c("tf_primary_rate", "tf_blood_rate", "telomere_insertion_rate") ~ log1p(value),
+      TRUE ~ value
+    ),
+    feature = recode(feature,
+      tf_primary_rate        = "tTF rate (log1p)",
+      tf_blood_rate          = "bTF rate (log1p)",
+      telomere_insertion_rate = "Tel. insertion (log1p)",
+      telomere_content_log2  = "Tel. content (log2)"
+    ),
+    feature = factor(feature, levels = c(
+      "tTF rate (log1p)", "bTF rate (log1p)",
+      "Tel. insertion (log1p)", "Tel. content (log2)"
+    ))
+  ) |>
+  filter(!is.na(value)) |>
+  ggplot(aes(x = alt_status, y = value, fill = alt_status)) +
+  geom_boxplot(outlier.size = 0.6, outlier.alpha = 0.3, width = 0.5) +
+  stat_compare_means(method = "wilcox.test", label = "p.signif",
+                     label.x = 1.5, size = 3.5, hide.ns = FALSE) +
+  scale_fill_manual(values = alt_colors) +
+  facet_grid(feature ~ cancer_group, scales = "free_y") +
+  theme_bw(base_size = 11) +
+  labs(x = NULL, y = NULL,
+       title = "Main telomere features by ALT status, stratified by cancer group") +
+  theme(legend.position = "none", strip.text = element_text(size = 9))
 ```
 
 # Scatter Plots
@@ -100,6 +170,24 @@ data |>
     y     = "log(1 + Telomere Insertion Rate)",
     color = "ALT status",
     title = "tTF Rate vs Telomere Insertion Rate"
+  ) +
+  theme_bw(base_size = 13)
+```
+
+### Stratified by cancer group
+
+```{r scatter-tf-telins-origin, fig.width=10, fig.height=5}
+data |>
+  filter(!is.na(tf_primary_rate), !is.na(telomere_insertion_rate), !is.na(cancer_group)) |>
+  ggplot(aes(log1p(tf_primary_rate), log1p(telomere_insertion_rate), color = alt_status)) +
+  geom_point(alpha = 0.45, size = 1.2) +
+  scale_color_manual(values = alt_colors) +
+  facet_wrap(~ cancer_group) +
+  labs(
+    x     = "log(1 + tTF rate)",
+    y     = "log(1 + Telomere Insertion Rate)",
+    color = "ALT status",
+    title = "tTF Rate vs Telomere Insertion Rate, stratified by cancer group"
   ) +
   theme_bw(base_size = 13)
 ```
@@ -389,6 +477,44 @@ ggplot(effect_df, aes(x = d, y = reorder(variant, d))) +
 
 The faceted boxplot shows that all nine singleton distance distributions are centred near zero (dashed reference line). ALT-high samples are systematically shifted upward across most variants. The Cohen's d ranked dot plot quantifies this: TTCGGG, TGAGGG, and TCAGGG show the largest positive effects (d \> 0.3), indicating the strongest ALT-associated elevation, while TTTGGG and GTAGGG have effect sizes near zero with overlapping confidence intervals and contribute little discriminative signal. The correlated elevation across variant types is consistent with a shared recombination mechanism: ALT-driven template switching reduces distances to the nearest singleton uniformly across telomeric repeat variants rather than acting selectively on a single sequence context.
 
+## Stratified by cancer group
+
+```{r singleton-by-origin, fig.height=10, fig.width=14}
+sing_long_mes <- data |>
+  filter(!is.na(cancer_group)) |>
+  select(alt_status, cancer_group, all_of(singleton_cols)) |>
+  pivot_longer(cols = all_of(singleton_cols),
+               names_to  = "variant",
+               values_to = "distance") |>
+  mutate(
+    variant    = str_remove(variant, "_singleton_dist"),
+    alt_status = factor(alt_status, levels = c("ALT-low", "ALT-high"))
+  )
+
+stats_mes <- sing_long_mes |>
+  group_by(variant, cancer_group) |>
+  wilcox_test(distance ~ alt_status) |>
+  adjust_pvalue(method = "BH") |>
+  add_significance() |>
+  add_xy_position(x = "alt_status")
+
+ggplot(sing_long_mes, aes(x = alt_status, y = distance, fill = alt_status)) +
+  geom_boxplot(outlier.shape = NA, alpha = 0.6, width = 0.5) +
+  geom_jitter(width = 0.15, alpha = 0.15, size = 0.4) +
+  geom_hline(yintercept = 0, linetype = "dashed", colour = "grey40") +
+  facet_grid(cancer_group ~ variant) +
+  scale_fill_manual(values = alt_colors) +
+  stat_pvalue_manual(stats_mes, label = "p.adj.signif", tip.length = 0.01) +
+  theme_bw() +
+  labs(
+    x     = NULL,
+    y     = "Singleton distance",
+    title = "Singleton distances by ALT status, stratified by cancer group"
+  ) +
+  theme(legend.position = "none",
+        strip.text = element_text(size = 8))
+```
+
 # Telomere content and tf_primary_rate stratified by ALT status
 
 ```{r tc-tfrate-scatter}
@@ -422,6 +548,42 @@ knitr::kable(spearman_tbl,
 ```
 
 In ALT-low tumours a negative correlation is expected and reflects the fundamental biology of replicative senescence: as telomeres shorten below the critical uncapping threshold, end-to-end fusions increase in frequency. Lower `telomere_content_log2` therefore predicts higher `tf_primary_rate`. In ALT-high tumours the relationship may differ or weaken because the ALT mechanism (break-induced replication, TERRA-mediated recombination) can simultaneously elongate telomeres and generate aberrant inter-telomeric junctions. This partial decoupling means that telomere length and fusion rate are no longer driven by the same rate-limiting step, and the Spearman correlation in this group is expected to be weaker or qualitatively different.
+
+## Stratified by cancer group
+
+```{r tc-tfrate-scatter-origin, fig.width=10, fig.height=5}
+ggplot(
+  data |> filter(!is.na(cancer_group)),
+  aes(x = telomere_content_log2, y = log1p(tf_primary_rate), colour = alt_status)
+) +
+  geom_point(alpha = 0.35, size = 1.1) +
+  geom_smooth(method = "lm", se = TRUE, linewidth = 0.9) +
+  scale_color_manual(values = alt_colors) +
+  facet_wrap(~ cancer_group) +
+  theme_bw() +
+  labs(
+    x      = "Telomere content (log2)",
+    y      = "log1p(tf_primary_rate)",
+    colour = "ALT status",
+    title  = "Telomere content vs telomere fusion rate, stratified by cancer group"
+  )
+
+spearman_tbl_mes <- data |>
+  filter(!is.na(cancer_group)) |>
+  group_by(cancer_group, alt_status) |>
+  summarise(
+    rho   = cor.test(telomere_content_log2, log1p(tf_primary_rate),
+                     method = "spearman", exact = FALSE)$estimate |> round(3),
+    p_val = cor.test(telomere_content_log2, log1p(tf_primary_rate),
+                     method = "spearman", exact = FALSE)$p.value |>
+              formatC(format = "e", digits = 2),
+    .groups = "drop"
+  )
+
+knitr::kable(spearman_tbl_mes,
+             col.names = c("Cancer group", "ALT status", "Spearman ρ", "p-value"),
+             caption   = "Spearman correlation: telomere content vs log1p(tf_primary_rate) by cancer group and ALT status")
+```
 
 # tf_blood_rate vs tf_primary_rate — shared genomic instability
 

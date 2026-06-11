@@ -19,6 +19,7 @@ library(here)
 library(readxl)
 library(ggpubr)
 library(rstatix)
+library(knitr)
 
 met_intrachrom <- read_xlsx(here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
 met_mesenchymal <- read_xlsx(here('data', 'processed', 'metastatic_red_edit_mesenchymal.xlsx'))
@@ -409,8 +410,6 @@ ggplot(motif_long_mes_met, aes(tumor_origin, singleton_dist, fill = tumor_origin
 # Singleton-distribution differences in top-tTF samples — Primary vs Metastatic
 
 ```{r setup-topTF}
-library(knitr)
-
 # --- Load data -------------------------------------------------------------
 # primary already loaded in setup chunk above
 
@@ -758,6 +757,21 @@ tttggg_plot_data <- tttggg_data %>%
       .fun = first
     )
   )
+
+tam_cols <- c('TERT_amp', 'TERTp_mut', 'TERT_mult', 'TERTp_sv')
+
+tttggg_tam_data <- tttggg_plot_data %>%
+  filter(cohort == "Primary") %>%
+  left_join(
+    primary %>% select(donor_id, all_of(tam_cols)),
+    by = c("sample_id" = "donor_id")
+  ) %>%
+  pivot_longer(
+    cols      = all_of(tam_cols),
+    names_to  = "tam_type",
+    values_to = "tam_present"
+  ) %>%
+  filter(tam_present == TRUE)
 ```
 
 `TTTGGG_singleton_dist` is a log2 tumor/control ratio normalized by telomere content. The analysis keeps cancer types with at least `r tttggg_min_n` samples in the corresponding cohort. For each cancer type, a one-sided Wilcoxon rank-sum test asks whether its `TTTGGG_singleton_dist` values are **shifted lower** than all other cancer types in the same cohort, using the raw continuous values (no threshold). The rank-biserial correlation reports the effect size (positive = lower than the rest), and Benjamini-Hochberg correction is applied separately within each cohort. The dashed line at 0 marks no tumor/control difference and is a visual reference only.
@@ -779,8 +793,24 @@ ggplot(tttggg_plot_data, aes(cancer_type_ordered, TTTGGG_singleton_dist)) +
     fatten = 0,
     color = "black"
   ) +
+  geom_point(
+    data     = tttggg_tam_data,
+    aes(shape = tam_type, fill = tam_type),
+    color    = "black",
+    size     = 2.4,
+    alpha    = 0.7,
+    position = position_jitter(width = 0.22, height = 0, seed = 1)
+  ) +
   facet_wrap(~ cohort, scales = "free_x", ncol = 1) +
   scale_color_manual(values = c("lower than rest" = "firebrick", "not significant" = "grey65")) +
+  scale_shape_manual(
+    name   = "TAM (primary)",
+    values = c(TERT_amp = 21, TERTp_mut = 24, TERT_mult = 22, TERTp_sv = 23)
+  ) +
+  scale_fill_manual(
+    name   = "TAM (primary)",
+    values = c(TERT_amp = "#E69F00", TERTp_mut = "#56B4E9", TERT_mult = "#CC79A7", TERTp_sv = "#009E73")
+  ) +
   scale_x_discrete(labels = \(x) str_remove(x, "^.*___")) +
   labs(
     x = NULL,
