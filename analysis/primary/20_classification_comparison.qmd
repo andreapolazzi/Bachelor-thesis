@@ -12,26 +12,33 @@ execute:
   warning: false
   message: false
   freeze: auto
+editor: 
+  markdown: 
+    wrap: 72
 ---
 
 # Purpose
 
-This notebook is the **single, fair comparison** of every classifier trained for
-ALT-status prediction (notebooks 02, 09, 10). Earlier notebooks each evaluated a
-model in isolation, on slightly different files, feature sets and CV schemes. Here
-all models are put on **identical footing**:
+This notebook is the **single, fair comparison** of every classifier
+trained for ALT-status prediction (notebooks 02, 09, 10). Earlier
+notebooks each evaluated a model in isolation, on slightly different
+files, feature sets and CV schemes. Here all models are put on
+**identical footing**:
 
-- **Same cohort**: complete cases of `PCAWG_primary.xlsx` (n = 817; 768 ALT-low / 49
-  ALT-high, i.e. **~6 % positive**).
-- **Same features**: the 14-feature set (`features14`) including the blood telomere
-  fusion rate, so no model has an information advantage.
-- **Same resampling**: one repeated **5-fold × 5-repeat stratified CV** (25 folds,
-  `set.seed(21)`), constructed with the exact code used in notebook 10, so the folds
-  are *byte-identical* across all models (verified below). This makes the comparison
-  **paired**: every model is scored on the same test samples in each fold.
-- **Same metrics, same code**: AUC, PR-AUC (average precision — the honest summary
-  under class imbalance), sensitivity, specificity, precision, F1 and balanced
-  accuracy, all at a fixed 0.5 threshold where thresholded, computed by one helper.
+-   **Same cohort**: complete cases of `PCAWG_primary.xlsx` (n = 817;
+    768 ALT-low / 49 ALT-high, i.e. **\~6 % positive**).
+-   **Same features**: the 14-feature set (`features14`) including the
+    blood telomere fusion rate, so no model has an information
+    advantage.
+-   **Same resampling**: one repeated **5-fold × 5-repeat stratified
+    CV** (25 folds, `set.seed(21)`), constructed with the exact code
+    used in notebook 10, so the folds are *byte-identical* across all
+    models (verified below). This makes the comparison **paired**: every
+    model is scored on the same test samples in each fold.
+-   **Same metrics, same code**: AUC, PR-AUC (average precision — the
+    honest summary under class imbalance), sensitivity, specificity,
+    precision, F1 and balanced accuracy, all at a fixed 0.5 threshold
+    where thresholded, computed by one helper.
 
 ```{r setup}
 library(readxl)
@@ -66,8 +73,9 @@ model_data <- model_full %>% select(all_of(features14), alt_status)
 
 # Cross-validation folds
 
-The 25 folds are built with the same construction (and seed) as the TabPFN notebook,
-so the cached TabPFN per-fold results line up one-to-one with the folds used here.
+The 25 folds are built with the same construction (and seed) as the
+TabPFN notebook, so the cached TabPFN per-fold results line up
+one-to-one with the folds used here.
 
 ```{r folds}
 source(here('scripts', 'make_folds.R'))
@@ -84,9 +92,10 @@ source(here('scripts', 'clf_metrics.R'))
 
 # Train and score the in-R models (LR, RF, LASSO)
 
-Logistic regression and random forest mirror notebook 02; LASSO mirrors notebook 09
-but is here run through the *same* 25-fold harness, with `lambda.1se` selected by an
-**inner** 10-fold CV on each training fold (nested CV, no leakage).
+Logistic regression and random forest mirror notebook 02; LASSO mirrors
+notebook 09 but is here run through the *same* 25-fold harness, with
+`lambda.1se` selected by an **inner** 10-fold CV on each training fold
+(nested CV, no leakage).
 
 ```{r run-in-r-models}
 X <- as.matrix(model_data[, features14])
@@ -117,9 +126,10 @@ for (s in cv_splits) {
 
 # Export the cohort + folds for the TabPFN out-of-fold run
 
-TabPFN is run on the GPU box (carmela), not here. We export the design matrix, the
-labels and the 5×5 fold assignment so the standalone script reproduces these *exact*
-folds and writes back per-sample out-of-fold probabilities.
+TabPFN is run on the GPU box (carmela), not here. We export the design
+matrix, the labels and the 5×5 fold assignment so the standalone script
+reproduces these *exact* folds and writes back per-sample out-of-fold
+probabilities.
 
 ```{r export-tabpfn-oof}
 cmp_dir <- here('outputs', 'shap_input_cmp_cv')
@@ -136,11 +146,12 @@ cat("                    --output outputs/tabpfn_cv_oof.csv\n")
 
 # Assemble TabPFN per-fold metrics
 
-If the out-of-fold probabilities are present (`outputs/tabpfn_cv_oof.csv`), TabPFN is
-scored with the **same** `fold_metrics()` as every other model (so PR-AUC and all
-thresholded metrics are perfectly consistent). Otherwise we fall back to the cached
-results from notebook 10 (which lack per-sample probabilities, so PR-AUC shows as
-*pending*).
+If the out-of-fold probabilities are present
+(`outputs/tabpfn_cv_oof.csv`), TabPFN is scored with the **same**
+`fold_metrics()` as every other model (so PR-AUC and all thresholded
+metrics are perfectly consistent). Otherwise we fall back to the cached
+results from notebook 10 (which lack per-sample probabilities, so PR-AUC
+shows as *pending*).
 
 ```{r tabpfn-metrics}
 oof_csv <- here('outputs', 'tabpfn_cv_oof.csv')
@@ -235,15 +246,14 @@ p
 
 # Reading the comparison
 
-- **AUC (threshold-free) is the fair headline.** TabPFN ranks ALT-high vs ALT-low
-  best (≈ 0.996), ahead of random forest and LASSO (≈ 0.98) and logistic regression
-  (≈ 0.94). Because the folds are shared, these differences are directly paired.
-- **At a 0.5 threshold the imbalance bites.** Tree/LASSO models reach very high
-  specificity and precision but lower sensitivity (they miss a chunk of the rare
-  ALT-high class), whereas logistic regression keeps the highest sensitivity /
-  balanced accuracy. This is a threshold artefact, not a ranking difference — hence
-  the emphasis on AUC and **PR-AUC** (average precision), which summarise performance
-  across all thresholds and are the honest metric at 6 % prevalence.
-- **Single-split numbers in notebooks 02/09/10 are optimistic** (e.g. LR's 0.998 on
-  one split vs 0.937 under CV) and should not be the figure quoted in the thesis; the
-  CV estimates above supersede them.
+-   **AUC (threshold-free) is the fair headline.** TabPFN ranks ALT-high
+    vs ALT-low best (≈ 0.996), ahead of random forest and LASSO (≈ 0.98)
+    and logistic regression (≈ 0.94). Because the folds are shared,
+    these differences are directly paired.
+-   **At a 0.5 threshold the imbalance bites.** Tree/LASSO models reach
+    very high specificity and precision but lower sensitivity (they miss
+    a chunk of the rare ALT-high class), whereas logistic regression
+    keeps the highest sensitivity / balanced accuracy. This is a
+    threshold artefact, not a ranking difference — hence the emphasis on
+    AUC and **PR-AUC** (average precision), which summarise performance
+    across all thresholds and are the honest metric at 6 % prevalence.

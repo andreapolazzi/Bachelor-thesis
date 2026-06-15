@@ -12,36 +12,42 @@ execute:
   warning: false
   message: false
   freeze: auto
+editor: 
+  markdown: 
+    wrap: 72
 ---
 
 # Purpose
 
-The single fair comparison of every regressor trained for the two telomere-fusion-rate
-targets:
+The single fair comparison of every regressor trained for the two
+telomere-fusion-rate targets:
 
-- **tTF** = `tf_primary_rate` (tumour TF rate), mirroring notebook 13_1 — strong
-  outlier `tf_primary_rate >= 10` removed.
-- **bTF** = `tf_blood_rate` (blood/germline TF rate), mirroring notebook 15_1 — no
-  outlier filter.
+-   **tTF** = `tf_primary_rate` (tumour TF rate), mirroring notebook
+    13_1 — strong outlier `tf_primary_rate >= 10` removed.
+-   **bTF** = `tf_blood_rate` (blood/germline TF rate), mirroring
+    notebook 15_1 — no outlier filter.
 
-Earlier regression notebooks each used an **80/20 single split** plus a 5×5 CV built
-with `createFolds()` **on the training split only**, while the TabPFN regression (old
-notebook 10) used a 5×5 CV on the **full** data — so the numbers were not comparable.
-Here every model is put on identical footing:
+Earlier regression notebooks each used an **80/20 single split** plus a
+5×5 CV built with `createFolds()` **on the training split only**, while
+the TabPFN regression (old notebook 10) used a 5×5 CV on the **full**
+data — so the numbers were not comparable. Here every model is put on
+identical footing:
 
-- **Same cohort** per target (complete cases of `PCAWG_primary.xlsx`, log1p target +
-  skewed features, `alt_status` kept as a predictor).
-- **Same features**: the full feature set (the other TF rate, telomere content /
-  insertion, TERT, the 9 TVR singletons, ALT status).
-- **Same resampling**: the shared **5-fold × 5-repeat stratified CV** from
-  `scripts/make_folds.R` (`seed = 21`, stratified on `alt_status`) — the same folds
-  used by the classification comparison and the SHAP runs. No held-out single split.
-- **Same metrics, same code** (`scripts/reg_metrics.R`): RMSE, MAE, Spearman ρ, all in
-  the model's log1p working space.
+-   **Same cohort** per target (complete cases of `PCAWG_primary.xlsx`,
+    log1p target + skewed features, `alt_status` kept as a predictor).
+-   **Same features**: the full feature set (the other TF rate, telomere
+    content / insertion, TERT, the 9 TVR singletons, ALT status).
+-   **Same resampling**: the shared **5-fold × 5-repeat stratified CV**
+    from `scripts/make_folds.R` (`seed = 21`, stratified on
+    `alt_status`) — the same folds used by the classification comparison
+    and the SHAP runs. No held-out single split.
+-   **Same metrics, same code** (`scripts/reg_metrics.R`): RMSE, MAE,
+    Spearman ρ, all in the model's log1p working space.
 
-TabPFN is **not** called through the cloud API: it runs on the GPU box (carmela) with
-the local `tabpfn` package via `scripts/tabpfn_cv_oof.py --task regression`, which
-writes per-sample out-of-fold predictions that this notebook scores with the same
+TabPFN is **not** called through the cloud API: it runs on the GPU box
+(carmela) with the local `tabpfn` package via
+`scripts/tabpfn_cv_oof.py --task regression`, which writes per-sample
+out-of-fold predictions that this notebook scores with the same
 `reg_fold_metrics()`.
 
 ```{r setup}
@@ -173,13 +179,16 @@ p
 
 # Reading the comparison
 
-- **tTF (tumour TF rate) is moderately predictable** (Spearman ρ ≈ 0.4); tree/linear
-  models land close together on RMSE/MAE in log1p space.
-- **bTF (blood TF rate) is only weakly predictable** (Spearman ρ ≈ 0.2) — expected,
-  since blood TF is a germline/normal-tissue quantity largely independent of the
-  tumour features. LASSO frequently shrinks to an intercept-only fit on bTF folds
-  (constant prediction → undefined ρ), which is itself evidence of weak signal.
-- The TabPFN rows fill in after the carmela run; because the folds are shared, the
-  comparison is paired and the boxplots are directly comparable fold-by-fold.
-- The zero-inflated two-part model and the SHAP interpretability stay in notebooks
-  13_1 / 15_1; this notebook is only the head-to-head predictive comparison.
+-   **tTF (tumour TF rate) is moderately predictable** (Spearman ρ ≈
+    0.4); tree/linear models land close together on RMSE/MAE in log1p
+    space.
+-   **bTF (blood TF rate) is only weakly predictable** (Spearman ρ ≈
+    0.2). LASSO frequently shrinks to an intercept-only fit on bTF folds
+    (constant prediction → undefined ρ), which is itself evidence of
+    weak signal.
+-   The TabPFN rows fill in after the carmela run; because the folds are
+    shared, the comparison is paired and the boxplots are directly
+    comparable fold-by-fold.
+-   The zero-inflated two-part model and the SHAP interpretability stay
+    in notebooks 13_1 / 15_1; this notebook is only the head-to-head
+    predictive comparison.

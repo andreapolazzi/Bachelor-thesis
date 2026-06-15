@@ -7,6 +7,9 @@ output: html_document
 
 # Setup
 
+This notebook prepares one-row-per-patient metastatic features and examines
+whether mesenchymal versus non-mesenchymal tumor origin structures the PCA space.
+
 ```{r setup, warning=FALSE}
 library(tidyverse, quietly = TRUE)
 library(readxl)
@@ -30,7 +33,9 @@ clean_data <- clean_data %>%
 summary(clean_data)
 ```
 
-**Importantly** we don't have info on TERT expression in this dataset. Moreover, TVR motifs are expressed in counts normalized by total reads.
+TERT expression is unavailable in this cohort. The initial source-table summary
+also uses TVR counts normalized by total reads, whereas the PCA below uses the
+processed singleton-distance features shared with later metastatic analyses.
 
 # PCA using metastatic mesenchymal groups
 

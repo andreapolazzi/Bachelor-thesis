@@ -9,6 +9,10 @@ execute:
   freeze: auto
 ---
 
+# Purpose
+
+This exploratory analysis compares matched blood and primary-tumor telomere fusion rates. It separates signal presence from signal magnitude because both variables are strongly zero-inflated.
+
 # Setup and data loading
 
 ```{r setup}
@@ -19,9 +23,9 @@ clean_data <- data
 summary(clean_data)
 ```
 
-# Distributions
+# Marginal distributions
 
-## Distributions - summary
+## Summary and zero prevalence
 
 ```{r summary-distributions}
 summary(clean_data$tf_blood_rate)
@@ -35,7 +39,7 @@ cat('Percentage of zeros in tf_blood_rate: ', zero_blood, "%\n")
 cat('Percentage of zeros in tf_primary_rate: ', zero_primary, "%\n")
 ```
 
-## Distributions - visual
+## Distribution plots
 
 ```{r visual-distributions}
 clean_data %>% 
@@ -59,7 +63,7 @@ clean_data %>%
   labs(title = 'Boxplot of tf_primary_rate', y = 'tf_primary_rate')
 ```
 
-# Scatter plots
+# Joint distributions
 
 ## Scatterplot raw
 
@@ -79,7 +83,9 @@ clean_data %>%
   labs(title = 'Scatterplot log1p(tf_blood_rate) vs log1p(tf_primary_rate)', x = 'log1p(tf_blood_rate)', y = 'log1p(tf_primary_rate)')
 ```
 
-# Distinction zero vs positive
+# Signal presence: zero versus positive
+
+The binary comparison asks whether detectable fusion signal tends to occur in both sample sources, independently of the magnitude among positive samples.
 
 ```{r zero-vs-positive}
 clean_data <- clean_data %>% 
@@ -178,7 +184,9 @@ ggplot(disc_pct, aes(x = pct_disc, y = reorder(cancer_type, pct_disc))) +
   theme_minimal()
 ```
 
-# Spearman correlation
+# Correlation among jointly positive samples
+
+Restricting to samples with positive signal in both sources avoids letting the shared mass at zero dominate the rank correlation.
 
 ```{r cor-spearman}
 positive_data <- clean_data %>% 
@@ -189,7 +197,7 @@ cor.test(positive_data$tf_blood_rate[positive_data$blood_pos == 1],
          method = 'spearman')
 ```
 
-# Relationship visualization
+# Relationship among jointly positive samples
 
 ```{r relationship-visualization}
 ggplot(positive_data, aes(x = log1p(tf_blood_rate), y = log1p(tf_primary_rate))) +

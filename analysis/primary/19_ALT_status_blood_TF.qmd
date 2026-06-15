@@ -93,6 +93,16 @@ cv_data <- model_data %>%
                              levels = c('ALT-low', 'ALT-high'),
                              labels = c('ALT_low', 'ALT_high')))
 
+twoClassSummaryPR <- function(data, lev = NULL, model = NULL) {
+  out  <- twoClassSummary(data, lev = lev, model = model)
+  prob <- data[[lev[2]]]
+  yb   <- as.integer(data$obs == lev[2])
+  o    <- order(prob, decreasing = TRUE); ybo <- yb[o]
+  tpp  <- cumsum(ybo); fpp <- cumsum(1 - ybo)
+  P    <- tpp / (tpp + fpp); R <- tpp / sum(yb)
+  c(out, PR_AUC = sum((R - c(0, head(R, -1))) * P))
+}
+
 set.seed(21)
 folds <- createMultiFolds(cv_data$alt_status, k = 5, times = 5)
 
@@ -102,7 +112,7 @@ ctrl <- trainControl(
   repeats         = 5,
   index           = folds,
   classProbs      = TRUE,
-  summaryFunction = twoClassSummary,
+  summaryFunction = twoClassSummaryPR,
   savePredictions = 'final'
 )
 
@@ -139,36 +149,45 @@ resamples_df <- bind_rows(resamples_list)
 ```
 
 ```{r paired-delta}
-# Reference: per-resample AUC of the full model, by model type
+# Reference: per-resample AUC and PR-AUC of the full model, by model type
 full_ref <- resamples_df %>%
   filter(feature_set == 'full') %>%
-  select(Resample, model, ROC_full = ROC)
+  select(Resample, model, ROC_full = ROC, PR_AUC_full = PR_AUC)
 
-# Paired ΔAUC = AUC[full + blood] − AUC[full]; positive => blood TF helps
+# Paired ΔAUC and ΔPR-AUC = metric[full + blood] − metric[full]
 delta_df <- resamples_df %>%
   filter(feature_set == 'full_blood') %>%
   left_join(full_ref, by = c('Resample', 'model')) %>%
-  mutate(delta_AUC = ROC - ROC_full)
+  mutate(delta_AUC    = ROC    - ROC_full,
+         delta_PR_AUC = PR_AUC - PR_AUC_full)
 
 blood_stat <- delta_df %>%
   group_by(model) %>%
   summarise(
-    n          = sum(!is.na(delta_AUC)),
-    auc_full   = mean(ROC_full, na.rm = TRUE),
-    auc_blood  = mean(ROC, na.rm = TRUE),
-    mean_delta = mean(delta_AUC, na.rm = TRUE),
-    sd_delta   = sd(delta_AUC,   na.rm = TRUE),
-    ci_low     = mean_delta - qt(0.975, df = n - 1) * sd_delta / sqrt(n),
-    ci_high    = mean_delta + qt(0.975, df = n - 1) * sd_delta / sqrt(n),
-    p_wilcoxon = wilcox.test(delta_AUC[!is.na(delta_AUC)],
-                             mu = 0, exact = FALSE)$p.value,
-    .groups    = 'drop'
+    n             = sum(!is.na(delta_AUC)),
+    auc_full      = mean(ROC_full,     na.rm = TRUE),
+    auc_blood     = mean(ROC,          na.rm = TRUE),
+    mean_delta    = mean(delta_AUC,    na.rm = TRUE),
+    sd_delta      = sd(delta_AUC,      na.rm = TRUE),
+    ci_low        = mean_delta - qt(0.975, df = n - 1) * sd_delta / sqrt(n),
+    ci_high       = mean_delta + qt(0.975, df = n - 1) * sd_delta / sqrt(n),
+    p_wilcoxon    = wilcox.test(delta_AUC[!is.na(delta_AUC)],
+                                mu = 0, exact = FALSE)$p.value,
+    pr_auc_full   = mean(PR_AUC_full,  na.rm = TRUE),
+    pr_auc_blood  = mean(PR_AUC,       na.rm = TRUE),
+    mean_pr_delta = mean(delta_PR_AUC, na.rm = TRUE),
+    sd_pr_delta   = sd(delta_PR_AUC,   na.rm = TRUE),
+    p_pr_wilcoxon = wilcox.test(delta_PR_AUC[!is.na(delta_PR_AUC)],
+                                mu = 0, exact = FALSE)$p.value,
+    .groups = 'drop'
   )
 
 blood_stat %>%
-  mutate(across(c(auc_full, auc_blood, mean_delta, sd_delta, ci_low, ci_high),
+  mutate(across(c(auc_full, auc_blood, mean_delta, sd_delta, ci_low, ci_high,
+                  pr_auc_full, pr_auc_blood, mean_pr_delta, sd_pr_delta),
                 ~ round(.x, 4)),
-         p_wilcoxon = signif(p_wilcoxon, 3)) %>%
+         p_wilcoxon    = signif(p_wilcoxon, 3),
+         p_pr_wilcoxon = signif(p_pr_wilcoxon, 3)) %>%
   print(n = Inf)
 
 write_csv(blood_stat, here('outputs', 'blood_tf', 'blood_tf_delta_auc.csv'))

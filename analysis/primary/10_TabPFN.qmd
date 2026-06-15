@@ -167,9 +167,11 @@ sv_dependence_shape(sv_imp2_rank, v = 'tf_blood_rate', color_var = 'tf_primary_r
 # sv_dependence(sv_rec_rank, v = 'TERT_FPKM',             color_var = 'TTTGGG_singleton_dist') + theme_bw()
 
 # Recontextualization, 5-fold CV
-sv_importance(sv_rec2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8) + theme_bw()
-sv_dependence_shape(sv_rec2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate',
-                    group = meta2$alt_status) + theme_bw()
+sv_importance(sv_rec2_rank, kind = 'beeswarm', bee_adjust = 10, alpha = 0.8) + theme_bw() + title("SHAP beeswarm plot of TabPFN ALT classifier", sub = 'Rank-average normalized features. 5-fold CV')
+
+
+
+sv_dependence_shape(sv_rec2_rank, v = 'telomere_insertion_rate', color_var = 'tf_primary_rate', group = meta2$alt_status) + theme_bw()
 sv_dependence_top(sv_rec2_rank, v = 'telomere_insertion_rate', group = meta2$cancer_type, top_n = 20, shape_group = meta2$alt_status) + theme_bw()
 sv_dependence_mes(sv_rec2_rank, v = 'telomere_insertion_rate', group = meta2$cancer_group, shape_group = meta2$alt_status) + theme_bw()
 sv_dependence_shape(sv_rec2_rank, v = 'telomere_content_log2', color_var = 'tf_primary_rate',

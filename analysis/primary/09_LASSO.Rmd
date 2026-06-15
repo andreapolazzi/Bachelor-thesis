@@ -157,6 +157,12 @@ plot(roc_lasso,
      xlim = c(1, 0))
 
 cat('AUC (out-of-fold, lambda.1se):', round(auc(roc_lasso), 4), "\n")
+
+yb_lasso <- as.integer(y == 'ALT-high')
+o_lasso  <- order(oof_probs, decreasing = TRUE); ybo_l <- yb_lasso[o_lasso]
+tpp_l    <- cumsum(ybo_l); fpp_l <- cumsum(1 - ybo_l)
+P_l      <- tpp_l / (tpp_l + fpp_l); R_l <- tpp_l / sum(yb_lasso)
+cat('PR-AUC (out-of-fold, lambda.1se):', round(sum((R_l - c(0, head(R_l, -1))) * P_l), 4), "\n")
 ```
 
 The ROC curve rises sharply, achieving **high sensitivity** at **near-perfect specificity**. This indicates strong discriminative performance, with the model accurately separating ALT-high from ALT-low samples based on predicted probabilities. The **AUC value is 0.9828**.

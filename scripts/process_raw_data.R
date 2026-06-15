@@ -3,8 +3,12 @@ library(here)
 library(writexl)
 source('scripts/clean_columns.R')
 
-# Drivers telins ####
-# Load datasets ####
+# =============================================================================
+# Metastatic telomere-insertion dataset
+# =============================================================================
+
+# Join driver annotations to patient codes, coverage, and purity before deriving
+# the normalized telomere-insertion measure.
 drivers <- readxl::read_xlsx('data/raw/drivers.xlsx')
 clean_drivers <- clean_drivers_data(drivers)
 clean_drivers <- clean_drivers %>% 
@@ -20,7 +24,7 @@ coverage <- readxl::read_xlsx('data/raw/Samples_hartwig_coverage.xlsx')
 
 TTAGGG_counts <- read.csv('../telomerehunter_results/spectrum.080426.maps.TTAGGG.csv', sep = ';')
 
-# Check structures and matches
+# Audit identifier completeness and overlap before joining.
 glimpse(code_conversion)
 summary(code_conversion)
 
@@ -37,19 +41,19 @@ ids_drivers <- clean_drivers$patient_id
 
 length(ids_code)
 length(ids_drivers)
-# They differ
+# Retain the mismatched sets for manual inspection.
 
 common_ids <- intersect(ids_code, ids_drivers)
 
 only_in_code  <- setdiff(ids_code, ids_drivers)
 only_in_driv  <- setdiff(ids_drivers, ids_code)
 
-# Let's see which ones are only in code_conversion
+# Inspect conversion-table IDs that have no driver-data match.
 code_conv_clean %>% 
   filter(Patient_ID_IF_mod %in% only_in_code) %>% 
   print(n = Inf)
 
-# Join the datasets, adding patient_code column
+# Add the sequencing patient code used by the coverage table.
 drivers_joined <- clean_drivers %>% 
   left_join(code_conv_clean %>% 
               select(Patient_ID_IF_mod, ...1),
@@ -58,7 +62,7 @@ drivers_joined <- clean_drivers %>%
   select(patient_id, ...1, everything()) %>% 
   rename(patient_code = ...1)
 
-# Now let's do the same for the coverage
+# Join coverage by sequencing patient code and inspect unmatched records.
 coverage <- coverage %>% 
   rename(patient_code = sample)
 
@@ -76,7 +80,7 @@ drivers_full %>%
   filter(!complete.cases(coverage)) %>% 
   print(n = Inf)
 
-# Tumor purity ####
+# Add tumor purity, the second denominator used for normalized insertions.
 metadata<- readxl::read_xlsx('data/raw/Metadatos_2_to_ALV.xlsx')
 
 drivers_final <- drivers_full %>% 
@@ -90,13 +94,14 @@ drivers_final <- drivers_full %>%
 summary(drivers_final)
 
 
-# Clean TTAGGG dataset ####
+# Keep tumor samples and chromosome-band counts; junction columns are not part
+# of the insertion proxy derived below.
 TTAGGG_counts_tum_no_junction <- TTAGGG_counts %>% 
   filter(str_starts(Sample, 'tumor')) %>% 
   select(-ncol(TTAGGG_counts), -contains('junction'))
 
 
-# Average TTAGGG counts for each band - visualization ####
+# Summarize band-level counts to identify recurrent terminal or outlier bands.
 band_means <- TTAGGG_counts_tum_no_junction %>% 
   select(-Sample) %>% 
   summarise(across(everything(), ~ mean(.x, na.rm = TRUE))) %>%
@@ -106,14 +111,14 @@ band_means <- TTAGGG_counts_tum_no_junction %>%
     values_to = 'mean_counts'
   )
 
-# table of the highest-mean bands
+# Inspect the highest-mean bands before defining exclusions.
 band_means %>% 
   mutate(is_outlier = mean_counts > quantile(mean_counts, 0.95)) %>% 
   arrange(desc(mean_counts)) %>% 
   slice(1:50) %>% 
   View()
 
-# plot of the 50 highest-mean bands
+# Visualize the bands that contribute most strongly across samples.
 band_means %>%
   arrange(desc(mean_counts)) %>%
   slice(1:50) %>%
@@ -122,13 +127,13 @@ band_means %>%
   coord_flip()
 
 
-# Adding telomere insertion information ####
+# Derive an internal-band TTAGGG count as a proxy for telomere insertions.
 
-# 1. genomic columns
+# Identify genomic band columns.
 genomic_cols <- colnames(TTAGGG_counts_tum_no_junction) %>%
   setdiff('Sample')
 
-# 2. parse the column name -> chr + arm + band
+# Parse chromosome arm and cytoband position from each column name.
 col_info <- tibble(col = genomic_cols) %>%
   separate(col, into = c('chr', 'arm_band'), sep = '_', remove = FALSE) %>%
   mutate(
@@ -136,18 +141,18 @@ col_info <- tibble(col = genomic_cols) %>%
     band = as.numeric(str_extract(arm_band, "\\d+\\.?\\d*"))
   )
 
-# 3. identify terminal bands
+# Terminal bands are excluded because they represent expected telomeric signal.
 terminal_cols <- col_info %>%
   group_by(chr, arm) %>%
   filter(band == max(band)) %>%
   pull(col)
 
-# 4. identify strong outlier bands based on the mean
+# Flag high-mean bands that may reflect recurrent non-insertion signal.
 outlier_cols <- band_means %>%
   filter(mean_counts > quantile(mean_counts, 0.95)) %>%
   pull(band)
 
-# highlight = columns of interest: non-terminal BUT outlier
+# Highlight non-terminal outliers for manual review.
 band_means_flag <- band_means %>%
   mutate(
     is_outlier = mean_counts > quantile(mean_counts, 0.95),
@@ -155,7 +160,7 @@ band_means_flag <- band_means %>%
     highlight = is_outlier & !is_terminal
   )
 
-# distribution of log(counts) highlight + outlier
+# Compare highlighted bands with the broader outlier set.
 band_means_flag %>%
   arrange(desc(mean_counts)) %>%
   slice(1:50) %>%
@@ -165,7 +170,7 @@ band_means_flag %>%
   scale_fill_manual(values = c('FALSE' = 'grey70', 'TRUE' = 'red'))+
   scale_color_manual(values = c('FALSE' = 'grey70', 'TRUE' = 'blue'))
 
-# distribution of log(counts) highlight + terminal
+# Check highlighted bands against terminal-band status.
 band_means_flag %>%
   arrange(desc(mean_counts)) %>%
   slice(1:60) %>%
@@ -175,36 +180,36 @@ band_means_flag %>%
   scale_fill_manual(values = c('FALSE' = 'grey70', 'TRUE' = 'red'))+
   scale_color_manual(values = c('FALSE' = 'grey70', 'TRUE' = 'green'))
 
-# 5. column selection
-# non-terminal outlier bands
+# Select non-terminal outlier bands.
 highlighted_cols <- band_means_flag %>%
   filter(highlight) %>%
   pull(band)
 
-# highlighted but kept (manual selection)
+# Preserve manually reviewed bands despite their outlier status.
 keep_cols <- c(
   'X9_q13', 'X2_q21.2', 'X9_p24.2', 'X2_q13', 'X2_p22.3',
   'Y_q11.223', 'X9_q34.11', 'X_p22.11', 'X5_p14.3',
   'X8_q12.3', 'X22_q11.21'
 )
 
-# final columns to exclude: all terminal bands + all highlighted ones NOT in keep_cols
+# Exclude terminal bands and non-terminal outliers not manually retained.
 exclude_cols <- c(
   terminal_cols,
   setdiff(highlighted_cols, keep_cols)
 )
 
-# columns to keep for the final sum
+# Sum only bands retained as plausible internal insertion signal.
 internal_cols <- setdiff(genomic_cols, exclude_cols)
 
-# 6. final sum
+# Derive the per-sample insertion count.
 tel_ins_dataset <- TTAGGG_counts_tum_no_junction %>% 
   mutate(tel_ins = rowSums(across(all_of(internal_cols)), na.rm = TRUE)) %>% 
   select(Sample, tel_ins, everything())
 
 
 
-# New tel_ins column ####
+# Normalize insertion counts by coverage and tumor purity. Zero or missing
+# denominators are left missing rather than producing infinite values.
 tel_ins_dataset_join <- tel_ins_dataset %>% 
   mutate(patient_code = str_remove(Sample, '^tumor_'),
          patient_code = str_remove(patient_code, '-.*$')
@@ -234,8 +239,11 @@ drivers_new %>%
   geom_point()
 
 
-# Blood TF rate primary ####
-## Load datasets####
+# =============================================================================
+# Primary cohort with matched blood TF rate
+# =============================================================================
+
+# Add matched blood TF rate to the cleaned PCAWG primary cohort.
 primary_data <- readxl::read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 clean_pr_data <- clean_pcawg_data(primary_data)
 blood_data <- readxl::read_xlsx(here('data', 'raw', 'PCAWG_TF_rate_tumor_blood.xlsx'))
@@ -250,7 +258,11 @@ primary_blood_data <- clean_pr_data %>%
 write_xlsx(primary_blood_data, here('data', 'processed', 'PCAWG_primary.xlsx'))  
 
 
-# Metastatic dataset + metadata ####
+# =============================================================================
+# Metastatic cohort assembly
+# =============================================================================
+
+# Join driver-level data with available clinical and treatment metadata.
 df1 <- readxl::read_xlsx('data/raw/drivers.xlsx')
 source(here('scripts', 'clean_columns.R'))
 source(here('scripts', 'useful_functions.R'))
@@ -271,7 +283,7 @@ metastatic_full <- janitor::clean_names(metastatic_full)
 metastatic_full <- metastatic_full %>% 
   rename_with(~ str_replace(.x, '^([a-z]{6})(?=_singleton)', toupper))
 
-# Group similar columns together
+# Place repeated source fields together so disagreements can be reviewed.
 metastatic_full <- metastatic_full %>% 
   relocate(cancer_type2, cancer_type_16, cancer_type_23, .after = cancer_type) %>% 
   relocate(cancer_type_code2, cancer_type_code_17, cancer_type_code_24, cancer_type_code_df3, .after = cancer_type_code) %>% 
@@ -304,7 +316,7 @@ metastatic_full <- metastatic_full %>%
   relocate(tissue_group, .before = tissue_group_15)
 
   
-# Drop real duplicates or order columns
+# Remove confirmed duplicates, ranking helpers, and superseded metadata fields.
 metastatic_full <- metastatic_full %>% 
                       select(-cancer_type_code_df3, -cancer_type_code_17) %>%
                       select(-cancer_type_16, -cancer_type_df3) %>% 
@@ -326,7 +338,7 @@ metastatic_full <- metastatic_full %>%
 
 write_xlsx(metastatic_full, here('data','processed','metastatic_full.xlsx'))
 
-# Another filtering
+# Create the reduced analysis table by excluding redundant or unused fields.
 data <- readxl::read_xlsx(here('data', 'processed', 'metastatic_full.xlsx'), na = c('', 'NA', 'null', 'NULL', 'unknown', 'Unknown'))
 data_no_red <- data %>% 
   select(-c(cancer_type2, cancer_type_23, primary_tumor_sub_location, primary_tumor_type_df4, primary_tumor_sub_location_df4, primary_tumor_extra_details, 
@@ -341,17 +353,20 @@ data_no_red <- data %>%
             is_blacklisted_sample, x12, x16, is_blacklisted, is_blacklisted_cohort, blacklist_comment, n_biopsies_in_patient, n_cancer_types_in_patient,
             is_selected_biopsy, doids, consolidated_treatment_type))
 
-# Handle 0's that should be NA's
+# In these categorical source fields, literal "0" denotes unavailable metadata.
 no_zero_cols <- c('primary_tumor_type', 'primary_tumor_sub_type')
 data_no_red_na <- data_no_red %>% 
   mutate(across(all_of(no_zero_cols), ~na_if(.x, '0')))
 
 write_xlsx(data_no_red_na, here('data','processed','metastatic_reduced.xlsx'))
-# Data has been reordered manually afterwards
+# NOTE: A manually reordered derivative is consumed below. Re-running this script
+# does not reproduce that manual ordering step.
 
 
 
-# Metastatic intrachromosomal reads TH2 ####
+# =============================================================================
+# Metastatic intrachromosomal reads and singleton distances
+# =============================================================================
 met_red_edit <- readxl::read_xlsx(here('data', 'processed', 'metastatic_reduced_edited.xlsx'))
 th2_results <- read.csv(here('data','raw','telomerehunter2_r3.results','telomerehunter2_r3.summaries.tsv'), sep = '\t')
 th_singleton_results <- readr::read_tsv(
@@ -381,7 +396,7 @@ singleton_norm_cols <- paste0(singleton_patterns, '_singletons_norm_by_all_reads
 singleton_dist_cols <- paste0(singleton_patterns, '_singleton_dist')
 singleton_rel_tol <- 5e-3
 
-# add patient code
+# Add the patient code used to align TelomereHunter outputs.
 met_red_edit_pat_code <- met_red_edit %>% 
   left_join(code_conv_df %>% select(patient_id, patient_code), by = 'patient_id') %>% 
   relocate(patient_code, .after = patient_id)
@@ -497,8 +512,11 @@ write_xlsx(met_intrachrom, here('data', 'processed', 'metastatic_red_edit_single
 
 
 
-# Cancer grouping ####
-## Primary ####
+# =============================================================================
+# Mesenchymal-origin grouping
+# =============================================================================
+
+# Primary cohort: assign cancer types to the predefined mesenchymal-origin set.
 data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 mes_ori <- c('Bone-Epith', 'Bone-Osteosarc', 'CNS-LGG', 'CNS-PiloAstro', 'Panc-Endocrine', 'SoftTissue-Leiomyo', 'SoftTissue-Liposarc')
@@ -516,7 +534,7 @@ mesenchymal_grouping_prim <- data %>%
 write_xlsx(mesenchymal_grouping_prim, here('data', 'processed', 'PCAWG_primary.xlsx'))
 
 
-## Metastatic ####
+# Metastatic cohort: join the externally curated origin grouping.
 data <- readxl::read_xlsx(here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx'))
 
 ori_data <- readxl::read_xlsx(here('data','raw', 'Hartwig_mesenchimal.xlsx'))
@@ -535,7 +553,9 @@ writexl::write_xlsx(mesenchymal_grouping_met, here('data', 'processed', 'metasta
 
 
 
-# Gene mutations primary ####
+# =============================================================================
+# Primary-cohort gene mutation indicators
+# =============================================================================
 genes_raw <- readxl::read_xlsx(
   here('data', 'raw', 'TableS3_panorama_driver_mutations_pcawg_v2_18042018_IF_mod.xlsx')
 )
@@ -615,4 +635,34 @@ print(missing_from_genes)
 
 write_xlsx(data_primary_genes, here('data', 'processed', 'PCAWG_primary+genes.xlsx'))
 
+
+# =============================================================================
+# Additional gene mutation columns for tTF analysis
+# OR4F21 is absent from the genes dataset and is dropped.
+# MET is already present in data_primary_genes from the previous block.
+# =============================================================================
+
+new_genes <- c('ATRX', 'EGFR', 'CDKN2A', 'APC', 'KIT', 'RB1', 'STK11')
+
+new_genes_long <- genes_raw %>%
+  filter(gene %in% new_genes) %>%
+  select(sample = `sample...1`, gene) %>%
+  distinct(sample, gene)
+
+new_genes_wide <- new_genes_long %>%
+  mutate(present = TRUE) %>%
+  pivot_wider(
+    id_cols     = sample,
+    names_from  = gene,
+    values_from = present,
+    values_fill = FALSE
+  ) %>%
+  right_join(genes_samples, by = 'sample') %>%
+  mutate(across(all_of(new_genes), ~ replace_na(.x, FALSE))) %>%
+  select(sample, all_of(new_genes))
+
+data_primary_genes2 <- data_primary_genes %>%
+  left_join(new_genes_wide, by = join_by(donor_id == sample))
+
+write_xlsx(data_primary_genes2, here('data', 'processed', 'PCAWG_primary+genes2.xlsx'))
 

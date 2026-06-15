@@ -2,11 +2,13 @@ library(tidyverse)
 library(readxl)
 library(here)
 
+# Audit whether two independently derived broad tumor groupings agree. This
+# script reports disagreements only; it does not choose or overwrite a grouping.
 met <- read_xlsx(here('data', 'processed', 'metastatic_red_edit_singleton_dist.xlsx')) %>%
   distinct(patient_id, .keep_all = TRUE) %>%
   select(patient_id, cancer_type, primary_tumor_type)
 
-# Group derived from cancer_type (free-text, regex-based)
+# Derive a broad group from free-text `cancer_type` using ordered regex rules.
 derive_from_cancer_type <- function(x) {
   case_when(
     str_detect(x, regex('melanoma', ignore_case = TRUE)) ~ 'Melanoma',
@@ -17,7 +19,7 @@ derive_from_cancer_type <- function(x) {
   )
 }
 
-# Group derived from primary_tumor_type (exact logic used in the plot chunk)
+# Reproduce the grouping logic used by the corresponding plot.
 derive_from_ptt <- function(x) {
   case_when(
     x == 'Carcinoma' ~ 'Carcinoma',

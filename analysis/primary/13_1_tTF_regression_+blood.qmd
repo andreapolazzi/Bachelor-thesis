@@ -11,7 +11,7 @@ execute:
   freeze: auto
 ---
 
-**Repeating the same pipeline from the previous document, adding blood TF rate.**
+This analysis extends the primary-tumor TF regression pipeline by including matched blood TF rate as a predictor. It evaluates whether the paired blood measurement adds predictive signal beyond the tumor and telomere features.
 
 # Setup
 
@@ -783,7 +783,7 @@ tibble(
 
 ```
 
-## How is the PRESENCE model performing?
+## Presence-model performance
 
 ```{r presence-model-auc}
 # AUC of presence model
@@ -819,7 +819,7 @@ confusionMatrix(
 )
 ```
 
-## How is the INTENSITY model performing?
+## Intensity-model performance
 
 ```{r intensity-model-performance}
 test_pos_idx <- test_orig_s$tf_primary_rate > 0
@@ -851,5 +851,3 @@ tibble(
   ) +
   theme_bw()
 ```
-
-## 

@@ -6,9 +6,11 @@ output: html_document
 ---
 
 # Setup
-In this first approach with the Hartwig Medical Foundation data, we will work using the dataset regarding driver genes information on patients affected by metastatic cancer. We will mainly focus on **TF rate vs TVR correlation**, **cancer type enrichment for high TF rate**, **TVR distribution by cancer type** and **PCA and clustering**.
+This exploratory analysis uses the Hartwig metastatic driver dataset to examine
+TF-rate versus TVR relationships, cancer-type enrichment among extreme TF rates,
+TVR distributions by cancer type, and multivariate structure.
 
-First of all, we must load the dataset and the required packages:
+Load the source dataset and required packages.
 ```{r setup, message=FALSE, warning=FALSE}
 library(tidyverse)
 library(readxl)
@@ -16,7 +18,8 @@ library(here)
 data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 ```
 
-When reading an Excel file, the function `read_xlsx` often refactors columns names adding "..." and a number corresponding to the column index. This is done to avoid ambiguity. Let's rename the columns of `data`
+The Excel source contains duplicated names that `read_xlsx()` disambiguates with
+column-position suffixes. Rename the fields used in this analysis explicitly.
 
 ```{r rename-columns}
 
@@ -37,9 +40,10 @@ colnames(data)[colnames(data) ==
 
 
 # Correlation between Telomere Fusion rate and Telomere Variant Repeats levels
-It could be interesting to see if there is any correlation between the two variables. It would make sense to expect some kind of relationship between the two, as the literature itself shows.
+Spearman correlation is used because the measurements are skewed and contain
+extreme values; the analysis asks whether higher fusion rates track TVR levels.
 
-Let's create a `tel_data` dataframe, from the original one `data`, containing only the variables we need:
+Create a patient-level table containing only the variables needed here.
 ```{r view-data}
 tel_data <- unique(
   data[, c(
@@ -120,7 +124,9 @@ ggplot(tel_data,
 We can see that the relationship is **positive** and **statistically significant**, but it is also a bit **stronger** in its effect size: TVR norm. by all reads explains ~6% of variance in TF rates.
 
 # Enrichment of extreme TF rates across cancer types
-As observed, there seems to be a subgroup of tumors that show an uncommonly high level of telomere fusions. An interesting analysis that could be done now is finding whether there is an **enrichment for some cancer types** in this subgroup. We arbitrarily chose a cutoff at the 99% quantile, and retained only the top 1%.
+The distribution suggests a subgroup with unusually high fusion rates. The next
+analysis tests whether cancer types are enriched in the upper 1% tail. This
+quantile is an exploratory threshold rather than a biologically validated cutoff.
 
 First we construct a dataframe with the required columns and keep only the top 1% observations for TF rates:
 ```{r top1-TF}
@@ -383,4 +389,3 @@ corrplot(
   tl.srt = 45
 )
 ```
-

@@ -1,5 +1,8 @@
 library(tidyverse)
 
+# Shared PCA helpers. The first column is treated as a grouping label and is
+# excluded from PCA; all remaining columns are standardized numeric features.
+
 pca_plot <- function(pca_data, coloring = pca_data[[1]], title = 'PCA'){
   X <- scale(pca_data[, -1])
   pca <- prcomp(X, center = TRUE, scale. = TRUE)
@@ -27,20 +30,20 @@ pca_biplot <- function(pca_data, coloring = pca_data[[1]], scale_arrows = 10, co
   pca <- prcomp(X, center = TRUE, scale. = TRUE)
   var_explained <- summary(pca)$importance[2,]
   
-  # sample coordinates
+  # Scores locate samples in PC space.
   scores <- data.frame(
     PC1 = pca$x[,1],
     PC2 = pca$x[,2],
     coloring = coloring
   )
   
-  # motif vectors
+  # Loadings show the direction and relative contribution of each feature.
   loadings <- data.frame(
     PC1 = pca$rotation[,1],
     PC2 = pca$rotation[,2],
     comp_names = if (is.null(compnames)) rownames(pca$rotation) else compnames)
   
-  # scale the loadings (smaller than sample coordinates) to make arrows more visible
+  # Rescale loadings only for display; this does not alter the fitted PCA.
   loadings$PC1 <- loadings$PC1 * scale_arrows
   loadings$PC2 <- loadings$PC2 * scale_arrows
   

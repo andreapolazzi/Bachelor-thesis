@@ -5,6 +5,12 @@ date: '`r Sys.Date()`'
 output: html_document
 ---
 
+# Purpose
+
+This analysis tests whether PCA patterns observed in PCAWG primary tumors can be
+reproduced in an external cell-line dataset. Separate PCA specifications compare
+the paper's aggregate TVR feature with individual, uncorrected motif frequencies.
+
 # Setup
 
 ```{r setup}
@@ -16,7 +22,7 @@ data <- read_xlsx(here('data', 'raw', 'tab1.xlsx'))
 
 ```
 
-# Motifs subset
+# PCA using the PCAWG-comparable motif subset
 
 We keep only a subset of variables, corresponding to the ones we have available for primary tumors.
 
@@ -40,7 +46,10 @@ biplot <- pca_biplot(pca_data, title = 'PCA biplot (motif subset)', scale_arrows
 biplot$plot
 ```
 
-# Repeat using TVR column instead of individual motifs
+# PCA using the aggregate TVR feature
+
+This specification most closely follows the published cell-line analysis because
+it uses the pre-computed aggregate TVR measurement rather than raw motif columns.
 ```{r tvr}
 pca_data <- data %>% 
   select(`ALT assay strength`, TelFusDetector_rate, TelFuse_newtelomere, TelSeq, TVR, TERT_exp) %>%
@@ -63,7 +72,11 @@ ggsave(here('outputs', 'cell_lines_PCA_biplot.pdf'))
 
 This is an **almost exact replica of the paper's Fig 1B**. 
 
-# Decompose TVR feature in individual motifs
+# Exploratory PCA using individual motifs
+
+These raw motif frequencies have not undergone the paper's depth and batch
+correction, so their loading directions are exploratory and not directly
+comparable with PCAWG singleton distances.
 
 ```{r tvr-decomp}
 pca_data <- data %>% 
@@ -101,7 +114,7 @@ by Bennett et al. (log-transformation followed by regression on depth-derived pr
 are not directly interpretable in the context of ALT biology, and direct comparison with the PCAWG results is not valid.
 
 
-# Restrict to primary tumors only
+# Sensitivity analysis: primary tumors only
 
 Importantly, I noticed that **the training set they used**, and on which I replicated their PCA, **contained both primary AND metastatic tumors**. We could see if, retaining only primary tumors, the same feature contributions to PCA emerge.
 
@@ -151,9 +164,12 @@ biplot$plot
 By looking at the resulting PCA biplots, we can see how the **contributions of features in the PCA is very much the same as before**, even when restricting the analysis only for primary tumor cell lines.
 
 
-# Using a larger dataset
+# Sensitivity analysis: include strongly predicted ALT labels
 
-We will now re-do the analysis, **enlarging the dataset to more observations**, coming from outside the training set. In particular, we will use observations for which no `ALT assay strength` value is present, but having a predicted value in `ALT_pred_class` with a strong enough `ALT_pred_prob`.
+This analysis enlarges the cohort by using `ALT_pred_class` when an experimental
+`ALT assay strength` label is unavailable. Weak-evidence predicted positives are
+excluded, but these predicted labels should still be interpreted separately from
+experimentally observed ALT status.
 
 ```{r pca-biplot-cells-larger, echo=FALSE}
 pca_data_larger <- data %>% 

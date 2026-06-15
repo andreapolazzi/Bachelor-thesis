@@ -10,11 +10,25 @@ execute:
   warning: false
   message: false
   freeze: auto
+editor: 
+  markdown: 
+    wrap: 72
 ---
+
+# Purpose
+
+This analysis measures how ALT-status classification changes when
+biologically related feature groups are removed. Every ablated feature
+set is evaluated on the same repeated cross-validation splits, allowing
+paired comparison with the full model.
 
 # Setup
 
 ## Prepare dataset
+
+Complete cases are used so every feature set is evaluated on the same
+patients; otherwise apparent ablation effects could be caused by cohort
+changes.
 
 ```{r setup}
 library(readxl)
@@ -34,6 +48,10 @@ summary(model_data)
 
 ## Define feature sets
 
+Each feature set removes one major measurement or the complete TVR motif
+block. The TVR-block result is therefore a group-ablation result, not a
+like-for-like comparison with removal of a single feature.
+
 ```{r feature-sets}
 feature_sets <- list(
   full = model_data,
@@ -47,7 +65,20 @@ feature_sets <- list(
 
 ## CV setup
 
+The shared folds keep each full-versus-ablated comparison paired by
+resample.
+
 ```{r cv-setup}
+twoClassSummaryPR <- function(data, lev = NULL, model = NULL) {
+  out  <- twoClassSummary(data, lev = lev, model = model)
+  prob <- data[[lev[2]]]
+  yb   <- as.integer(data$obs == lev[2])
+  o    <- order(prob, decreasing = TRUE); ybo <- yb[o]
+  tpp  <- cumsum(ybo); fpp <- cumsum(1 - ybo)
+  P    <- tpp / (tpp + fpp); R <- tpp / sum(yb)
+  c(out, PR_AUC = sum((R - c(0, head(R, -1))) * P))
+}
+
 set.seed(21)
 folds <- createMultiFolds(model_data$alt_status, k = 5, times = 5)
 
@@ -57,12 +88,12 @@ ctrl <- trainControl(
   repeats = 5,
   index = folds,
   classProbs = TRUE,
-  summaryFunction = twoClassSummary,
+  summaryFunction = twoClassSummaryPR,
   savePredictions = 'final'
 )
 ```
 
-# Train models
+# Train and compare models
 
 ```{r training, warning=FALSE, message=FALSE}
 results <- data.frame()
@@ -109,6 +140,8 @@ for (fs in names(feature_sets)) {
         model = m,
         mean_AUC = mean(rs$ROC, na.rm = TRUE),
         sd_AUC = sd(rs$ROC, na.rm = TRUE),
+        mean_PR_AUC = mean(rs$PR_AUC, na.rm = TRUE),
+        sd_PR_AUC = sd(rs$PR_AUC, na.rm = TRUE),
         mean_sensitivity = mean(rs$Sens, na.rm = TRUE),
         mean_specificity = mean(rs$Spec, na.rm = TRUE)
       )
@@ -126,7 +159,7 @@ results <- results %>%
 print(results, n = 12)
 ```
 
-# Plots
+# Performance overview
 
 ```{r plotting}
 ggplot(results, aes(x = feature_set, y = mean_AUC, fill = model)) +
@@ -179,22 +212,40 @@ ggplot(results_long, aes(x = feature_set, y = value, fill = feature_set)) +
 
 ```
 
-The **small increases** in AUC that we see we have after removing certain features such as telomeric content, TERT, or TF rate **are normal** and are due to random variation in the data and the training process. This can happen when the **removed feature is not very informative** for the model, or when **its contribution is overshadowed** by other features.
+Small AUC increases after removing features such as telomere content,
+TERT, or TF rate can arise from resampling variation, weak incremental
+signal, or redundancy with retained predictors. The paired analysis
+below is used to distinguish these small fluctuations from consistent
+performance changes.
 
-**Removing TVR motif** features causes the **largest performance decrease** in both models, particularly for Random Forest, suggesting that telomere variant repeat composition contains strong predictive information for ALT status. **Removing telomere insertion rate** also **noticeably reduces performance**.
+**Removing TVR motif** features causes the **largest performance
+decrease** in both models, particularly for Random Forest, suggesting
+that telomere variant repeat composition contains strong predictive
+information for ALT status. **Removing telomere insertion rate** also
+**noticeably reduces performance**.
 
-Of course, **when removing TVR motifs we are removing 9 individual features instead of one**, and thus an abrupt decrease in performance can be expected. Although informative on TVR motifs contribution to classification, **the comparison is not fair**. The three sections below address this and provide a rigorous statistical basis for the findings.
+Of course, **when removing TVR motifs we are removing 9 individual
+features instead of one**, and thus an abrupt decrease in performance
+can be expected. Although informative on TVR motifs contribution to
+classification, **the comparison is not fair**. The three sections below
+address this and provide a rigorous statistical basis for the findings.
 
----
+------------------------------------------------------------------------
 
-# Statistical Validation of ΔAUC
+# Paired statistical validation of ΔAUC
 
-The mean ΔAUC reported above is a single point estimate. Because we used repeated cross-validation, each model was evaluated on 100 independent resamples (5 folds × 5 repeats), and the same fold assignments were used for every feature set. This allows **paired** comparison: for every resample we can compute the exact AUC difference between the ablated and full model, then test whether the distribution of these differences is centred at zero.
+The mean ΔAUC reported above is a single point estimate. Repeated 5-fold
+cross-validation evaluates each model on 25 resamples, and the same fold
+assignments are used for every feature set. This allows a **paired**
+comparison: for every resample, compute the AUC difference between the
+ablated and full model, then test whether those differences are centred
+at zero. Resamples overlap and should not be interpreted as fully
+independent experiments.
 
 ```{r stat-validation, message=FALSE, warning=FALSE}
 dir.create(here('outputs', 'feature_ablation'), showWarnings = FALSE, recursive = TRUE)
 
-# --- combine all resamples into a single tidy frame ---
+# Combine every model and feature-set resample into one tidy frame.
 all_resamples_df <- bind_rows(all_resamples)
 
 # Reference: per-resample AUC of the full model, by model type
@@ -237,7 +288,10 @@ write_csv(stat_summary, here('outputs', 'feature_ablation', 'stat_summary_group_
 
 ## ΔAUC distributions across resamples
 
-The boxplots below show the full distribution of per-resample ΔAUC for each ablated feature set. A distribution centred well below zero indicates a consistent performance penalty; one centred near zero indicates that the removed feature added little independent information.
+The boxplots below show the full distribution of per-resample ΔAUC for
+each ablated feature set. A distribution centred well below zero
+indicates a consistent performance penalty; one centred near zero
+indicates that the removed feature added little independent information.
 
 ```{r plot-delta-distributions, message=FALSE, warning=FALSE, fig.width=10, fig.height=5}
 fs_labels <- c(
@@ -304,15 +358,32 @@ ggsave(here('outputs', 'feature_ablation', 'delta_AUC_CI_significance.pdf'),
        p_ci, width = 9, height = 4)
 ```
 
-The paired Wilcoxon test (one-sample, H₀: median ΔAUC = 0) and FDR correction across feature sets distinguish **systematic** performance changes from random fold-to-fold variation. A negative ΔAUC with FDR < 0.05 means the removed feature consistently contributed predictive power. A non-significant ΔAUC — particularly for TERT, TF rate, or telomere content — does not imply biological irrelevance; it may reflect **feature redundancy** (see Section 3).
+The paired Wilcoxon test (one-sample, H₀: median ΔAUC = 0) and FDR
+correction across feature sets distinguish **systematic** performance
+changes from random fold-to-fold variation. A negative ΔAUC with FDR \<
+0.05 means the removed feature consistently contributed predictive
+power. A non-significant ΔAUC — particularly for TERT, TF rate, or
+telomere content — does not imply biological irrelevance; it may reflect
+**feature redundancy** (see Section 3).
 
----
+------------------------------------------------------------------------
 
 # Within-TVR LOFO Analysis
 
-The group ablation above removed all nine TVR singleton distance features at once. To fairly rank individual motifs, the LOFO must be evaluated in a context where TVR features are the **only predictors**: including other strong signals (telomere insertion rate, TERT) would absorb most of the classification variance, shrinking each motif's marginal ΔAUC to near zero and making differences between motifs undetectable. The TVR-only context also uses the larger dataset of patients not excluded by TERT missingness (~1943 vs ~817), giving more power to detect within-family differences.
+The group ablation above removed all nine TVR singleton distance
+features at once. To fairly rank individual motifs, the LOFO must be
+evaluated in a context where TVR features are the **only predictors**:
+including other strong signals (telomere insertion rate, TERT) would
+absorb most of the classification variance, shrinking each motif's
+marginal ΔAUC to near zero and making differences between motifs
+undetectable. The TVR-only context also uses the larger dataset of
+patients not excluded by TERT missingness (\~1943 vs \~817), giving more
+power to detect within-family differences.
 
-The **baseline** is a model trained on all nine TVR motifs. ΔAUC = AUC[8-motif model] − AUC[all-9 baseline]. The most negative ΔAUC identifies the motif carrying the most non-redundant discriminatory power within the TVR feature family.
+The **baseline** is a model trained on all nine TVR motifs. ΔAUC =
+AUC\[8-motif model\] − AUC\[all-9 baseline\]. The most negative ΔAUC
+identifies the motif carrying the most non-redundant discriminatory
+power within the TVR feature family.
 
 ```{r lofo-data-setup, message=FALSE, warning=FALSE}
 # Build TVR-only dataset from all patients with TVR data (no TERT restriction)
@@ -340,7 +411,7 @@ ctrl_tvr <- trainControl(
   repeats         = 5,
   index           = folds_tvr,
   classProbs      = TRUE,
-  summaryFunction = twoClassSummary,
+  summaryFunction = twoClassSummaryPR,
   savePredictions = 'final'
 )
 
@@ -395,8 +466,10 @@ for (fs in names(lofo_sets)) {
     lofo_results <- rbind(lofo_results, data.frame(
       feature_set = fs,
       model       = nm,
-      mean_AUC    = mean(rs$ROC, na.rm = TRUE),
-      sd_AUC      = sd(rs$ROC,   na.rm = TRUE)
+      mean_AUC    = mean(rs$ROC,    na.rm = TRUE),
+      sd_AUC      = sd(rs$ROC,      na.rm = TRUE),
+      mean_PR_AUC = mean(rs$PR_AUC, na.rm = TRUE),
+      sd_PR_AUC   = sd(rs$PR_AUC,   na.rm = TRUE)
     ))
   }
 }
@@ -448,7 +521,11 @@ write_csv(lofo_stat_summary,
 
 ## Ranked LOFO plot
 
-The most negative ΔAUC identifies the motif whose removal consistently hurts the TVR-only model the most, i.e. the one carrying the strongest non-redundant signal within this feature family. Motifs near zero are likely redundant with others: they contribute information, but that information is already captured by the remaining eight motifs.
+The most negative ΔAUC identifies the motif whose removal consistently
+hurts the TVR-only model the most, i.e. the one carrying the strongest
+non-redundant signal within this feature family. Motifs near zero are
+likely redundant with others: they contribute information, but that
+information is already captured by the remaining eight motifs.
 
 ```{r lofo-plot, message=FALSE, warning=FALSE, fig.width=9, fig.height=5}
 p_lofo <- ggplot(lofo_stat_summary,
@@ -500,13 +577,26 @@ ggsave(here('outputs', 'feature_ablation', 'lofo_tvr_distributions.pdf'),
        p_lofo_box, width = 10, height = 5)
 ```
 
-The TVR-only LOFO is the correct context for this ranking: when other strong features are included, they absorb most of the classification signal and per-motif ΔAUC becomes uninformatively small. By comparing 8-motif vs 9-motif TVR-only models on the larger ~1943-patient dataset, the analysis isolates the genuine within-family contribution of each motif. Motifs with near-zero ΔAUC should not be dismissed as uninformative; they are likely **redundant** representatives of the same biological signal, a point directly supported by the correlation structure in the next section.
+The TVR-only LOFO is the correct context for this ranking: when other
+strong features are included, they absorb most of the classification
+signal and per-motif ΔAUC becomes uninformatively small. By comparing
+8-motif vs 9-motif TVR-only models on the larger \~1943-patient dataset,
+the analysis isolates the genuine within-family contribution of each
+motif. Motifs with near-zero ΔAUC should not be dismissed as
+uninformative; they are likely **redundant** representatives of the same
+biological signal, a point directly supported by the correlation
+structure in the next section.
 
----
+------------------------------------------------------------------------
 
 # Redundancy Analysis
 
-A key reason why some individually biologically meaningful features may show weak or non-significant LOFO effects is **feature redundancy**: if two predictors carry correlated information, removing one is partially compensated for by the other. This section characterises the correlation structure of all numeric predictors in the full feature set to contextualise the ablation results.
+A key reason why some individually biologically meaningful features may
+show weak or non-significant LOFO effects is **feature redundancy**: if
+two predictors carry correlated information, removing one is partially
+compensated for by the other. This section characterises the correlation
+structure of all numeric predictors in the full feature set to
+contextualise the ablation results.
 
 ```{r redundancy-setup, message=FALSE, warning=FALSE}
 # Clean readable labels for every numeric feature
@@ -584,21 +674,73 @@ ggsave(here('outputs', 'feature_ablation', 'correlation_heatmap_full.pdf'),
        p_heatmap, width = 9, height = 8)
 ```
 
-
 ## Interpretation
 
-The feature ablation analyses consistently identify **telomere variant repeat (TVR) composition as the strongest predictive signal for ALT status** among the evaluated telomere-related feature groups. Removing all TVR motifs produced the largest and most consistent decrease in ROC-AUC across both Logistic Regression and Random Forest models, and this effect remained significant after FDR correction. This supports the interpretation that ALT tumors are characterised by a distinct telomeric sequence-composition state enriched for non-canonical telomere repeats.
+The feature ablation analyses consistently identify **telomere variant
+repeat (TVR) composition as the strongest predictive signal for ALT
+status** among the evaluated telomere-related feature groups. Removing
+all TVR motifs produced the largest and most consistent decrease in
+ROC-AUC across both Logistic Regression and Random Forest models, and
+this effect remained significant after FDR correction. This supports the
+interpretation that ALT tumors are characterised by a distinct telomeric
+sequence-composition state enriched for non-canonical telomere repeats.
 
-Among the remaining feature groups, **telomere insertion rate** showed the strongest independent contribution to classification performance. Its removal consistently reduced model performance in both model classes, suggesting that telomere insertion events capture non-redundant information associated with ALT-related genomic instability. This is biologically coherent with the proposed role of ALT in recombination-driven telomere remodeling and neo-telomere formation.
+Among the remaining feature groups, **telomere insertion rate** showed
+the strongest independent contribution to classification performance.
+Its removal consistently reduced model performance in both model
+classes, suggesting that telomere insertion events capture non-redundant
+information associated with ALT-related genomic instability. This is
+biologically coherent with the proposed role of ALT in
+recombination-driven telomere remodeling and neo-telomere formation.
 
-In contrast, TERT expression, TF rate, and telomere content showed weak or non-significant ΔAUC changes when removed individually from the full model. Importantly, this **should not be interpreted as evidence that these variables are biologically irrelevant to ALT**. Rather, the results indicate that much of their predictive information is already represented by the broader telomeric instability and TVR composition features included in the model. In this context, the ablation analysis measures independent predictive contribution conditional on the remaining feature space, not absolute biological importance.
+In contrast, TERT expression, TF rate, and telomere content showed weak
+or non-significant ΔAUC changes when removed individually from the full
+model. Importantly, this **should not be interpreted as evidence that
+these variables are biologically irrelevant to ALT**. Rather, the
+results indicate that much of their predictive information is already
+represented by the broader telomeric instability and TVR composition
+features included in the model. In this context, the ablation analysis
+measures independent predictive contribution conditional on the
+remaining feature space, not absolute biological importance.
 
-The within-family TVR LOFO analysis further refined this interpretation. When evaluated in a TVR-only setting, the TVR signal was not distributed uniformly across motifs. Instead, a small subset of motifs (particularly **TTTGGG and TGAGGG**) accounted for most of the non-redundant predictive contribution within the TVR family, while removal of the remaining motifs produced little or no consistent AUC decrease. This pattern suggests that ALT-associated TVR composition is structured around a limited number of dominant motifs, whereas many additional motifs behave as partially redundant representatives of the same underlying telomeric remodeling process.
+The within-family TVR LOFO analysis further refined this interpretation.
+When evaluated in a TVR-only setting, the TVR signal was not distributed
+uniformly across motifs. Instead, a small subset of motifs (particularly
+**TTTGGG and TGAGGG**) accounted for most of the non-redundant
+predictive contribution within the TVR family, while removal of the
+remaining motifs produced little or no consistent AUC decrease. This
+pattern suggests that ALT-associated TVR composition is structured
+around a limited number of dominant motifs, whereas many additional
+motifs behave as partially redundant representatives of the same
+underlying telomeric remodeling process.
 
-Importantly, these findings are fully compatible with the enrichment and PCA-based analyses reported previously. PCA loadings and differential enrichment analyses identify motifs that co-vary with the global ALT state, whereas the present LOFO analyses quantify which motifs contribute unique predictive information once the broader compositional signature is already represented. Consequently, a motif may show strong ALT enrichment or large PCA loadings while still exhibiting a small LOFO ΔAUC if its information is highly correlated with that of other motifs.
+Importantly, these findings are fully compatible with the enrichment and
+PCA-based analyses reported previously. PCA loadings and differential
+enrichment analyses identify motifs that co-vary with the global ALT
+state, whereas the present LOFO analyses quantify which motifs
+contribute unique predictive information once the broader compositional
+signature is already represented. Consequently, a motif may show strong
+ALT enrichment or large PCA loadings while still exhibiting a small LOFO
+ΔAUC if its information is highly correlated with that of other motifs.
 
-The redundancy analysis supports this interpretation. **Correlations among TVR motifs were generally weak-to-moderate** rather than extreme, suggesting partial overlap rather than complete interchangeability. This degree of correlation is nevertheless sufficient for machine-learning models to redistribute predictive weight across motifs, explaining why the TVR family collectively exerts a strong effect while many individual motifs show limited standalone contribution.
+The redundancy analysis supports this interpretation. **Correlations
+among TVR motifs were generally weak-to-moderate** rather than extreme,
+suggesting partial overlap rather than complete interchangeability. This
+degree of correlation is nevertheless sufficient for machine-learning
+models to redistribute predictive weight across motifs, explaining why
+the TVR family collectively exerts a strong effect while many individual
+motifs show limited standalone contribution.
 
-Taken together, these analyses support a model in which ALT is associated not with isolated motif changes, but with a broader and coordinated telomeric compositional remodeling state. Within this state, a limited subset of motifs (particularly TTTGGG and TGAGGG) appears to capture the largest fraction of the non-redundant discriminatory signal, while telomere insertion rate provides an additional orthogonal marker of ALT-associated genomic instability.
+Taken together, these analyses support a model in which ALT is
+associated not with isolated motif changes, but with a broader and
+coordinated telomeric compositional remodeling state. Within this state,
+a limited subset of motifs (particularly TTTGGG and TGAGGG) appears to
+capture the largest fraction of the non-redundant discriminatory signal,
+while telomere insertion rate provides an additional orthogonal marker
+of ALT-associated genomic instability.
 
-Finally, because repeated cross-validation resamples are partially overlapping and therefore not fully independent, the reported confidence intervals and p-values should be interpreted primarily as measures of resampling stability rather than formal population-level statistical inference.
+Finally, because repeated cross-validation resamples are partially
+overlapping and therefore not fully independent, the reported confidence
+intervals and p-values should be interpreted primarily as measures of
+resampling stability rather than formal population-level statistical
+inference.

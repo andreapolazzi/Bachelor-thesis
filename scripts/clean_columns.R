@@ -1,3 +1,7 @@
+# Standardize the two source schemas before downstream analyses refer to columns
+# by name. These functions intentionally preserve values and column order except
+# for the explicit removal of a confirmed duplicate in `clean_drivers_data()`.
+
 clean_drivers_data <- function(data) {
   
   colnames(data)[colnames(data) == 'Patient_ID_IF_mod'] <- 'patient_id'
@@ -58,7 +62,8 @@ clean_pcawg_data <- function(data) {
     'TTTGGG_singleton_dist'
   )
 
-  # columns that should be numeric
+  # Coerce measurement columns explicitly because Excel imports can mix numeric
+  # values with literal missing-value strings.
   numeric_cols <- c(
     'tf_rate',
     'telomere_insertion_rate',
@@ -75,14 +80,15 @@ clean_pcawg_data <- function(data) {
     'TTTGGG_singleton_dist'
   )
 
-  # convert literal 'NA' strings or blanks to real NA, then numeric
+  # Treat source-level missing-value tokens as missing before numeric conversion.
   data[numeric_cols] <- lapply(data[numeric_cols], function(x) {
     x <- trimws(as.character(x))
     x[x %in% c('NA', '', 'NaN')] <- NA
     as.numeric(x)
   })
 
-  # make categories factors
+  # Fix the ALT reference level so model coefficients consistently describe
+  # ALT-high relative to ALT-low.
   data$alt_status  <- factor(data$alt_status, levels = c('ALT-low', 'ALT-high'))
   data$cancer_type <- factor(data$cancer_type)
 

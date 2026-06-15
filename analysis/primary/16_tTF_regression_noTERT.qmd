@@ -11,6 +11,12 @@ execute:
   freeze: auto
 ---
 
+# Purpose
+
+This sensitivity analysis repeats primary-tumor TF regression without TERT
+expression. Removing TERT increases the usable cohort and tests whether conclusions
+depend on the smaller TERT-complete subset.
+
 # Setup
 
 ```{r setup}
@@ -777,7 +783,7 @@ tibble(
 ) %>% arrange(RMSE)
 ```
 
-## How is the PRESENCE model performing?
+## Presence-model performance
 
 ```{r presence-model-auc}
 # AUC of presence model
@@ -814,7 +820,7 @@ confusionMatrix(
 
 ```
 
-## How is the INTENSITY model performing?
+## Intensity-model performance
 
 ```{r intensity-model-performance}
 test_pos_idx <- test_orig_s$tf_primary_rate > 0
@@ -846,5 +852,3 @@ tibble(
   ) +
   theme_bw()
 ```
-
-## 

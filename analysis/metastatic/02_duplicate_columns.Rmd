@@ -5,17 +5,20 @@ date: "`r Sys.Date()`"
 output: html_document
 ---
 
-# REMARK ON DUPLICATE COLUMNS
-In the original dataset **some columns seem to be repeated** (cancer_type, cancer_type_code, Mixed_def, Tumor_Telomere fusion rate (Gt-end/coverage*purity), TTGGGG_singletons_norm_by_all_reads_ORDER, CATGGG_singletons_norm_by_all_reads_ORDER). Let's run some checks to see what is going on.
+# Duplicate-column audit
 
-First of all, we must load the dataset:
+The source dataset contains apparently repeated fields for cancer annotations,
+fusion rate, and singleton-order measurements. This notebook determines which
+pairs are true duplicates and which represent discordant or mislabeled data.
+
+Load the unmodified source so the duplicate fields can be compared directly.
 ```{r setup, message=FALSE, warning=FALSE}
 library(readxl)
 library(here)
 data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 ```
 
-We will first check if, for each duplicate column, also the content is duplicated or they actually report different (discordant) info.
+First test whether each candidate pair contains equivalent values.
 
 ```{r check-duplicates}
 dup1 <- c('cancer_type...2', 'cancer_type_code...3', 'Mixed_def...4', 'Tumor_Telomere fusion rate (Gt-end/coverage*purity)...5', 'TTGGGG_singletons_norm_by_all_reads_ORDER...42', 'CATGGG_singletons_norm_by_all_reads_ORDER...50')
@@ -28,7 +31,8 @@ res <- mapply(function(col1, col2) {
 res
 ```
 
-Interesting results: columns that are labeled as TRUE have matching duplicate values, otherwise FALSE. Let's analyze them one by one:
+`TRUE` indicates equivalent content within tolerance; discordant pairs are
+inspected individually below.
 
 ## Cancer type
 ```{r cancer-type}
@@ -75,11 +79,12 @@ unique(data[data$CATGGG_singletons_norm_by_all_reads_ORDER...50!=data$CATGGG_sin
 Here we have to be careful: although the columns have the same name and the same values for all patients, there is an **error in the dataset** again. The error is the same as before (first is correct, second should be intratel), but there was no detectable difference in the content because CATGGG reads are 0 in both cases and in every patient. **This column should be renamed**.
 
 
-# Column renaming
-With these consideration being made, we can now rename the columns and remove duplicates or ambiguities.
+# Standardized column names
+
+Apply the shared cleaning function after documenting which duplicates can be
+removed and which mislabeled columns require distinct names.
 ```{r column-rename}
 source(here('scripts', 'clean_columns.R'))
 tel_data <- clean_drivers_data(data)
 colnames(tel_data)
 ```
-

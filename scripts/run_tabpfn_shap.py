@@ -10,6 +10,9 @@ import tabpfn_client
 from tabpfn_client import TabPFNClassifier
 from tabpfn_extensions import interpretability
 
+# Legacy hosted-client SHAP workflow using a single train/test split. The local,
+# out-of-fold interpretation workflow is implemented in SHAP_tabpfn_local.py.
+
 
 def main() -> None:
     token = os.getenv("TABPFN_TOKEN")

@@ -1,0 +1,336 @@
+---
+title: "22_tTF_genes"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+execute:
+  echo: false
+  warning: false
+  message: false
+  freeze: auto
+---
+
+# Setup
+
+```{r setup}
+library(tidyverse)
+library(here)
+library(broom)
+library(lme4)
+library(patchwork)
+library(scales)
+
+tidy_fixef <- function(model, conf.int = FALSE, conf.level = 0.95) {
+  s <- summary(model)$coefficients
+  out <- tibble(
+    term      = rownames(s),
+    estimate  = s[, 'Estimate'],
+    std.error = s[, 'Std. Error'],
+    statistic = s[, grep('value', colnames(s))[1]],
+    p.value   = if ('Pr(>|z|)' %in% colnames(s)) s[, 'Pr(>|z|)'] else NA_real_
+  )
+  if (conf.int) {
+    z <- qnorm(1 - (1 - conf.level) / 2)
+    out$conf.low  <- out$estimate - z * out$std.error
+    out$conf.high <- out$estimate + z * out$std.error
+  }
+  out
+}
+
+data <- readxl::read_xlsx(here('data', 'processed', 'PCAWG_primary+genes2.xlsx'))
+
+# OR4F21 is absent from the PCAWG driver mutations dataset (TableS3) and is excluded.
+gene_cols <- c('ATRX', 'EGFR', 'CDKN2A', 'APC', 'KIT', 'MET', 'RB1', 'STK11')
+
+data <- data %>%
+  mutate(
+    across(all_of(gene_cols), as.logical),
+    cancer_group = factor(cancer_group),
+    cancer_type  = factor(cancer_type)
+  )
+
+cat('Dataset:', nrow(data), 'patients,', ncol(data), 'columns\n')
+cat('tTF rate range: [', round(min(data$tf_primary_rate, na.rm = TRUE), 3),
+    ',', round(max(data$tf_primary_rate, na.rm = TRUE), 3), ']\n')
+cat('Patients with tTF = 0:', sum(data$tf_primary_rate == 0, na.rm = TRUE), '\n')
+```
+
+This notebook tests whether higher tumor telomere fusion rates (`tf_primary_rate`) are
+associated with mutations in `r paste(gene_cols, collapse = ', ')`.
+Gene columns were derived from the PCAWG panorama driver mutation table (TableS3).
+OR4F21 is not present in that dataset and is excluded from all analyses.
+ATRX reflects ATRX-only mutations; the merged ATRX/DAXX indicator used in earlier
+notebooks (`ATRX_DAXX_trunc`) is kept separate and is not used here.
+
+# Descriptive analysis
+
+## Mutation frequencies
+
+```{r freq-table}
+na_mask <- is.na(data[[gene_cols[1]]])
+
+freq_tbl <- tibble(
+  gene    = gene_cols,
+  n_TRUE  = sapply(gene_cols, function(g) sum(data[[g]], na.rm = TRUE)),
+  n_FALSE = sapply(gene_cols, function(g) sum(!data[[g]], na.rm = TRUE)),
+  n_NA    = sapply(gene_cols, function(g) sum(is.na(data[[g]]))),
+  pct_TRUE = round(100 * n_TRUE / (n_TRUE + n_FALSE), 2)
+)
+knitr::kable(freq_tbl, caption = 'Gene mutation frequencies')
+```
+
+## Missingness pattern
+
+```{r missingness}
+cat('Patients with no gene annotation:', sum(na_mask), '\n')
+
+na_by_type <- data %>%
+  mutate(missing_genes = na_mask) %>%
+  group_by(cancer_type) %>%
+  summarise(n = n(), n_missing = sum(missing_genes),
+            pct_missing = round(100 * n_missing / n, 1)) %>%
+  filter(n_missing > 0) %>%
+  arrange(desc(pct_missing))
+knitr::kable(na_by_type, caption = 'Cancer types with missing gene annotations')
+```
+
+## tTF distribution by mutation status
+
+```{r ttf-boxplots, fig.width=12, fig.height=7}
+plot_data <- data %>%
+  filter(!na_mask) %>%
+  select(tf_primary_rate, all_of(gene_cols)) %>%
+  pivot_longer(all_of(gene_cols), names_to = 'gene', values_to = 'mutated') %>%
+  mutate(
+    mutated = ifelse(mutated, 'Mutated', 'Wild-type'),
+    ttf_log1p = log1p(tf_primary_rate)
+  )
+
+ggplot(plot_data, aes(mutated, ttf_log1p, fill = mutated)) +
+  geom_violin(alpha = 0.6, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.size = 0.5, fill = 'white', alpha = 0.8) +
+  facet_wrap(~ gene, scales = 'free_x', nrow = 2) +
+  scale_fill_manual(values = c('Mutated' = '#e07b54', 'Wild-type' = '#5b8db8')) +
+  labs(title = 'log1p(tTF rate) by mutation status',
+       x = NULL, y = 'log1p(tf_primary_rate)', fill = NULL) +
+  theme_bw() +
+  theme(legend.position = 'bottom', strip.text = element_text(face = 'bold'))
+```
+
+# Univariate associations with tTF rate
+
+Wilcoxon rank-sum test on the raw tTF rate (zero-inflated, non-parametric approach).
+
+```{r wilcoxon-ttf}
+wx_ttf <- map_dfr(gene_cols, function(g) {
+  d <- data %>% filter(!is.na(.data[[g]]), !is.na(tf_primary_rate))
+  wt <- wilcox.test(d$tf_primary_rate ~ d[[g]], exact = FALSE)
+  med_mut <- median(d$tf_primary_rate[d[[g]]], na.rm = TRUE)
+  med_wt  <- median(d$tf_primary_rate[!d[[g]]], na.rm = TRUE)
+  tibble(
+    gene          = g,
+    n_mutated     = sum(d[[g]]),
+    median_mut    = round(med_mut, 4),
+    median_wt     = round(med_wt, 4),
+    W             = wt$statistic,
+    p_value       = wt$p.value
+  )
+}) %>%
+  mutate(p_adj_BH = p.adjust(p_value, method = 'BH'),
+         p_value  = format.pval(p_value,  digits = 2),
+         p_adj_BH = format.pval(p_adj_BH, digits = 2))
+
+knitr::kable(wx_ttf, caption = 'Wilcoxon rank-sum: gene mutation vs tTF rate')
+```
+
+## Cancer-type confounding check
+
+```{r fisher-group}
+fisher_group <- map_dfr(gene_cols, function(g) {
+  d <- data %>% filter(!is.na(.data[[g]]))
+  tbl <- table(d[[g]], d$cancer_group)
+  if (any(dim(tbl) < 2)) return(NULL)
+  ft <- fisher.test(tbl)
+  tibble(gene = g, p_value = ft$p.value)
+}) %>%
+  mutate(p_adj_BH = p.adjust(p_value, method = 'BH'),
+         p_value  = format.pval(p_value,  digits = 2),
+         p_adj_BH = format.pval(p_adj_BH, digits = 2))
+knitr::kable(fisher_group,
+             caption = 'Fisher exact: gene mutation vs cancer_group (confounding check)')
+```
+
+# Adjusted models: gene effect on tTF beyond cancer type
+
+Outcome: `log1p(tf_primary_rate)`. We test each gene one at a time via likelihood ratio
+test, adjusting first for `cancer_group` (fixed) and then for `cancer_type` as a random
+intercept. Genes with fewer than 20 mutated cases are flagged but excluded from modelling.
+
+```{r select-genes}
+genes_used <- freq_tbl %>%
+  filter(n_TRUE >= 20) %>%
+  pull(gene)
+
+cat('Genes with n_TRUE >= 20 (used in adjusted models):',
+    paste(genes_used, collapse = ', '), '\n')
+cat('Genes excluded (n_TRUE < 20):',
+    paste(setdiff(gene_cols, genes_used), collapse = ', '), '\n')
+```
+
+## Adjusted by `cancer_group` (fixed effect)
+
+```{r lrt-cancer-group}
+d_cc <- data %>%
+  filter(!na_mask) %>%
+  mutate(ttf = log1p(tf_primary_rate)) %>%
+  drop_na(ttf)
+
+lrt_group <- map_dfr(genes_used, function(g) {
+  m0 <- lm(ttf ~ cancer_group, data = d_cc)
+  fm <- as.formula(paste0('ttf ~ cancer_group + ', g))
+  m1 <- lm(fm, data = d_cc)
+  ftest <- anova(m0, m1)
+  coef  <- tidy(m1, conf.int = TRUE) %>% filter(term == paste0(g, 'TRUE'))
+  tibble(
+    gene      = g,
+    estimate  = round(coef$estimate, 3),
+    conf.low  = round(coef$conf.low, 3),
+    conf.high = round(coef$conf.high, 3),
+    F_stat    = round(ftest$F[2], 3),
+    p_value   = ftest$`Pr(>F)`[2]
+  )
+}) %>%
+  mutate(p_adj_BH = p.adjust(p_value, method = 'BH'),
+         p_value  = format.pval(p_value,  digits = 2),
+         p_adj_BH = format.pval(p_adj_BH, digits = 2))
+
+knitr::kable(lrt_group,
+             caption = 'F-test vs baseline (cancer_group only). Effect on log1p(tTF).')
+```
+
+## Adjusted by `cancer_type` (mixed effects)
+
+```{r lrt-mixed}
+lrt_mixed <- map_dfr(genes_used, function(g) {
+  m0 <- lmer(ttf ~ (1 | cancer_type), data = d_cc, REML = FALSE)
+  fm <- as.formula(paste0('ttf ~ ', g, ' + (1 | cancer_type)'))
+  m1 <- lmer(fm, data = d_cc, REML = FALSE)
+  lr <- anova(m0, m1)
+  coef <- tidy_fixef(m1) %>% filter(term == paste0(g, 'TRUE'))
+  tibble(
+    gene      = g,
+    estimate  = round(coef$estimate, 3),
+    std.error = round(coef$std.error, 3),
+    LRT_chisq = round(lr$Chisq[2], 3),
+    LRT_p     = lr$`Pr(>Chisq)`[2]
+  )
+}) %>%
+  mutate(LRT_p_adj_BH = p.adjust(LRT_p, method = 'BH'),
+         LRT_p        = format.pval(LRT_p,        digits = 2),
+         LRT_p_adj_BH = format.pval(LRT_p_adj_BH, digits = 2))
+
+knitr::kable(lrt_mixed,
+             caption = 'LRT vs baseline (random intercept for cancer_type). Effect on log1p(tTF).')
+```
+
+# Joint multivariate model
+
+All viable genes simultaneously, with `cancer_type` as random effect.
+
+```{r joint-model}
+joint_formula <- as.formula(
+  paste0('ttf ~ ', paste(genes_used, collapse = ' + '), ' + (1 | cancer_type)')
+)
+m_joint <- lmer(joint_formula, data = d_cc, REML = FALSE)
+
+joint_tbl <- tidy_fixef(m_joint, conf.int = TRUE) %>%
+  filter(term != '(Intercept)') %>%
+  mutate(conf.low  = round(conf.low,  3),
+         conf.high = round(conf.high, 3),
+         estimate  = round(estimate,  3),
+         p.value   = format.pval(p.value, digits = 2)) %>%
+  select(term, estimate, conf.low, conf.high, std.error, p.value)
+
+knitr::kable(joint_tbl, digits = 3,
+             caption = 'Joint model: all viable genes + cancer_type random effect (outcome: log1p(tTF))')
+```
+
+```{r forest-plot, fig.width=7, fig.height=4}
+fp <- tidy_fixef(m_joint, conf.int = TRUE) %>%
+  filter(term != '(Intercept)') %>%
+  mutate(term = str_remove(term, 'TRUE$'))
+
+ggplot(fp, aes(estimate, fct_reorder(term, estimate))) +
+  geom_vline(xintercept = 0, linetype = 'dashed', color = 'grey50') +
+  geom_pointrange(aes(xmin = conf.low, xmax = conf.high)) +
+  labs(title = 'Gene effects on log1p(tTF rate)',
+       subtitle = 'Joint model with cancer_type random effect (95% Wald CI)',
+       x = 'Coefficient (log1p scale)', y = NULL) +
+  theme_bw()
+```
+
+# Stratified analysis within cancer group
+
+```{r stratified}
+stratified <- map_dfr(genes_used, function(g) {
+  map_dfr(levels(d_cc$cancer_group), function(grp) {
+    sub <- d_cc %>% filter(cancer_group == grp)
+    n_mut <- sum(sub[[g]], na.rm = TRUE)
+    if (n_mut < 5 || sum(!sub[[g]], na.rm = TRUE) < 5) {
+      return(tibble(gene = g, group = grp, n_mutated = n_mut,
+                    median_mut = NA_real_, median_wt = NA_real_, p_value = NA_real_))
+    }
+    wt <- wilcox.test(sub$tf_primary_rate ~ sub[[g]], exact = FALSE)
+    tibble(
+      gene      = g,
+      group     = grp,
+      n_mutated = n_mut,
+      median_mut = round(median(sub$tf_primary_rate[sub[[g]]], na.rm = TRUE), 4),
+      median_wt  = round(median(sub$tf_primary_rate[!sub[[g]]], na.rm = TRUE), 4),
+      p_value    = wt$p.value
+    )
+  })
+}) %>%
+  mutate(p_value = ifelse(is.na(p_value), NA, format.pval(p_value, digits = 2)))
+
+knitr::kable(stratified,
+             caption = 'Stratified Wilcoxon tests within each cancer_group')
+```
+
+# Sensitivity: impute NA as FALSE
+
+```{r sensitivity}
+d_imp <- data %>%
+  mutate(across(all_of(gene_cols), ~ replace_na(.x, FALSE)),
+         ttf = log1p(tf_primary_rate)) %>%
+  drop_na(ttf)
+
+sens <- map_dfr(genes_used, function(g) {
+  m0 <- lm(ttf ~ cancer_group, data = d_imp)
+  fm <- as.formula(paste0('ttf ~ cancer_group + ', g))
+  m1 <- lm(fm, data = d_imp)
+  ftest <- anova(m0, m1)
+  coef  <- tidy(m1, conf.int = TRUE) %>% filter(term == paste0(g, 'TRUE'))
+  tibble(
+    gene      = g,
+    estimate  = round(coef$estimate, 3),
+    p_value   = ftest$`Pr(>F)`[2]
+  )
+}) %>%
+  mutate(p_adj_BH = p.adjust(p_value, method = 'BH'),
+         p_value  = format.pval(p_value,  digits = 2),
+         p_adj_BH = format.pval(p_adj_BH, digits = 2))
+
+knitr::kable(sens, caption = 'Sensitivity: NA imputed as FALSE')
+```
+
+# Summary
+
+-   OR4F21 is absent from the PCAWG driver mutation table and is excluded throughout.
+-   The table above shows which of the eight genes (ATRX, EGFR, CDKN2A, APC, KIT, MET, RB1, STK11) have sufficient prevalence (n ≥ 20 mutated cases) for stable regression.
+-   The Wilcoxon tests and adjusted linear models (log1p tTF ~ gene + cancer_type random effect) identify which mutations carry a statistically independent signal for higher or lower tTF rates beyond cancer-type composition.
+-   The forest plot summarises effect direction and uncertainty for the joint multivariate model.
+-   The stratified analysis indicates whether any gene–tTF association is specific to mesenchymal vs non-mesenchymal tumours.
+-   If conclusions are consistent between complete-case and NA-imputed analyses, missingness is not driving the results.

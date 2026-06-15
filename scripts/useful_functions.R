@@ -1,3 +1,6 @@
+# Compare two potentially duplicated columns while handling numeric coercion,
+# missing values, and floating-point tolerance. Discordant rows are returned for
+# inspection rather than resolved automatically.
 compare_columns <- function(data, col1, col2, id_col = 'patient_id', tol = 1e-8) {
   
   if (!all(c(col1, col2, id_col) %in% names(data))) {

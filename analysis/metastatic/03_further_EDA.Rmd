@@ -7,9 +7,10 @@ output: html_document
 
 # Setup
 
-Let's do another EDA, but this time let's see if there are any differences correlating **telomere length** to variables such as **TF rates**, **TVR norm. by all reads** or **TVR norm. by intratel. reads**.
+This analysis examines how the telomere-content proxy relates to TF rate and TVR
+measurements normalized by either all reads or intratelomeric reads.
 
-First of all, we must load the dataset and the required packages:
+Load the source dataset and required packages.
 ```{r setup, message=FALSE, warning=FALSE}
 library(readxl)
 library(ggplot2)
@@ -17,14 +18,15 @@ library(here)
 data <- read_xlsx(here('data', 'raw', 'drivers.xlsx'))
 ```
 
-And rename/remove duplicate columns, along with awkwardly named ones:
+Standardize duplicated and awkward source column names.
 
 ```{r renaming}
 source(here('scripts', 'clean_columns.R'))
 clean_data <- clean_drivers_data(data)
 ```
 
-Let's create the subset that we need (the column `tel_reads/total reads` can be considered as a representative of telomere length):
+Create a patient-level subset. Here, `tel_reads/total reads` is used as a proxy
+for telomere content rather than a direct physical length measurement.
 
 ```{r subset}
 tel_data <- unique(
@@ -42,7 +44,8 @@ summary(tel_data)
 
 # Correlation between Telomere Length and all other features
 ## Telomere Length vs TVR norm. by total reads
-We choose Spearman as our correlation method since it deals with monotonic, non-parametric relationships. Pearson's correlation has some assumptions that do not hold true in most biological data: normality and absence of outliers
+Spearman correlation is used because these biological measurements are skewed,
+contain outliers, and may have monotonic but non-linear relationships.
 ```{r correlation-allreads, warning=FALSE, message=FALSE}
 ggplot(tel_data, aes(`tel_reads/total reads`, tvr_all)) +
   geom_point(alpha=0.2) +
@@ -78,4 +81,3 @@ As regards the TF rate (log transformed) we see that telomere length is **positi
 model <- lm(log1p(tumor_tf_rate)~`tel_reads/total reads`, data=tel_data)
 summary(model)
 ```
-

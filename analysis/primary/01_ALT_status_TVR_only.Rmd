@@ -7,7 +7,7 @@ output: html_document
 
 # Setup
 
-Let's load the dataset and have a look at it.
+Load and standardize the PCAWG source table before selecting the TVR-only cohort.
 
 ```{r setup}
 library(readxl)
@@ -16,7 +16,8 @@ data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 summary(data)
 ```
 
-We have to rename columns, set categories as factors, deal with NA values, and handle typing.
+The shared cleaning helper standardizes names, numeric types, missing values, and
+factor reference levels used by downstream models.
 
 ```{r cleaning-data}
 source(here('scripts', 'clean_columns.R'))
@@ -39,7 +40,8 @@ summary(model_data)
 
 # PCA with TVR motifs
 
-Here we perform PCA using the TVR motif variables only.
+PCA summarizes correlated TVR singleton-distance patterns without using ALT status
+to fit the components. ALT labels are added only for visualization.
 
 ```{r PCA}
 X <- scale(model_data[, tvr_cols])
@@ -68,24 +70,25 @@ pca$rotation
 
 ## PCA biplot of TVR motifs
 
-We see, using the info stored in the loadings of the PCs, what motifs drive the components variability. 
+The loading vectors show which motifs contribute to the first two components;
+their display length is rescaled only to make the biplot readable.
 
 ```{r biplot}
-# sample coordinates
+# Scores locate samples in PC space.
 scores <- data.frame(
   PC1 = pca$x[,1],
   PC2 = pca$x[,2],
   ALT = model_data$alt_status
 )
 
-# motif vectors
+# Loadings show motif directions and relative contributions.
 loadings <- data.frame(
   PC1 = pca$rotation[,1],
   PC2 = pca$rotation[,2],
   motif = sapply(strsplit(rownames(pca$rotation), split = '_', fixed = TRUE), `[`, 1)
 )
 
-# scale the loadings (smaller than sample coordinates) to make arrows more visible
+# Rescale loadings only for display.
 loadings$PC1 <- loadings$PC1 * 10
 loadings$PC2 <- loadings$PC2 * 10
 
@@ -114,14 +117,15 @@ In the PCA biplot, the vectors corresponding to **TTCGGG** and **TTTGGG** align 
 
 # Supervised classification
 
-Now we move on to supervised classification. The goal is to **test whether TVR motifs can predict ALT status**, and then see if adding other features improves performance. Conceptually, we can follow this pipeline:
+The supervised analysis tests whether TVR motifs predict ALT status and whether
+additional telomere features improve performance. The workflow is:
 
-- 1 split train/test
-- 2 define feature sets
-- 3 train models
-- 4 cross-validate
-- 5 evaluate performance
-- 6 compute feature importance
+1. split train/test;
+2. define feature sets;
+3. train models;
+4. cross-validate;
+5. evaluate performance; and
+6. compute feature importance.
 
 ## Split the dataset
 
@@ -186,6 +190,12 @@ roc_obj <- roc(
 plot(roc_obj, main = 'ROC curve - Logistic regression (TVR only)', xlim = c(1, 0))
 
 auc(roc_obj)
+
+yb_lr <- as.integer(test_glm$alt_status == 'ALT-high')
+o_lr  <- order(prob, decreasing = TRUE); ybo_lr <- yb_lr[o_lr]
+tpp_lr <- cumsum(ybo_lr); fpp_lr <- cumsum(1 - ybo_lr)
+P_lr   <- tpp_lr / (tpp_lr + fpp_lr); R_lr <- tpp_lr / sum(yb_lr)
+cat('PR-AUC (LogReg):', round(sum((R_lr - c(0, head(R_lr, -1))) * P_lr), 4), "\n")
 ```
 
 And we can see that the performance of this model is **pretty good** (AUC=0.8795), supporting the idea that **TVR motifs** already contain **useful predictive information**. The steep initial rise of the curve suggests that the model can correctly identify many ALT-high tumors while maintaining a **low false positive rate**.
@@ -258,6 +268,12 @@ plot(
 )
 
 auc(roc_rf)
+
+yb_rf <- as.integer(test$alt_status == 'ALT-high')
+o_rf  <- order(rf_prob, decreasing = TRUE); ybo_rf <- yb_rf[o_rf]
+tpp_rf <- cumsum(ybo_rf); fpp_rf <- cumsum(1 - ybo_rf)
+P_rf   <- tpp_rf / (tpp_rf + fpp_rf); R_rf <- tpp_rf / sum(yb_rf)
+cat('PR-AUC (RF):', round(sum((R_rf - c(0, head(R_rf, -1))) * P_rf), 4), "\n")
 ```
 The Random Forest classifier achieved an **AUC of 0.9232**, indicating excellent discrimination between ALT-high and ALT-low tumors using only TVR motif features, and is slightly improved compared with the logistic regression model, suggesting that allowing **nonlinear relationships** between motifs provides **additional predictive power**.
 
@@ -300,8 +316,13 @@ get_fold_metrics <- function(prob, truth, positive_class = 'ALT-high', threshold
   cm <- confusionMatrix(data = pred, reference = truth, positive = positive_class)
   roc_obj <- roc(response = truth, predictor = prob,
                  levels = c(negative_class, positive_class), quiet = TRUE)
+  yb  <- as.integer(truth == positive_class)
+  o   <- order(prob, decreasing = TRUE); ybo <- yb[o]
+  tpp <- cumsum(ybo); fpp <- cumsum(1 - ybo)
+  P   <- tpp / (tpp + fpp); R <- tpp / sum(yb)
   tibble(
     auc               = as.numeric(auc(roc_obj)),
+    pr_auc            = sum((R - c(0, head(R, -1))) * P),
     sensitivity       = unname(cm$byClass['Sensitivity']),
     specificity       = unname(cm$byClass['Specificity']),
     precision         = unname(cm$byClass['Pos Pred Value']),
@@ -364,7 +385,7 @@ logreg_results
 logreg_summary <- logreg_results %>%
   summarise(
     across(
-      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      c(auc, pr_auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
       .names = '{.col}_{.fn}'
     )
@@ -429,7 +450,7 @@ rf_results
 rf_summary <- rf_results %>%
   summarise(
     across(
-      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      c(auc, pr_auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
       .names = '{.col}_{.fn}'
     )
@@ -445,7 +466,7 @@ model_comparison <- all_results %>%
   group_by(model) %>%
   summarise(
     across(
-      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      c(auc, pr_auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
       .names = '{.col}_{.fn}'
     ),
@@ -454,4 +475,3 @@ model_comparison <- all_results %>%
 
 model_comparison
 ```
-

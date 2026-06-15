@@ -11,9 +11,16 @@ execute:
   freeze: auto
 ---
 
+# Purpose
+
+TERT expression is missing for a large subset of samples. This analysis checks
+whether missingness is associated with ALT status, cancer type, or other telomere
+features before complete-case models are interpreted.
+
 # Setup
 
-We load the dataset and the necessary libraries
+Create explicit missingness indicators so observed and missing TERT groups can be
+compared without imputing expression values.
 
 ```{r setup}
 library(tidyverse)
@@ -31,7 +38,10 @@ data_analysis <- clean_data %>%
   )
 ```
 
-# Visualize missingness pattern
+# Missingness overview
+
+The plots assess both overall missingness and whether TERT availability occupies a
+distinct region of the telomere-feature space.
 
 ```{r visualize}
 cat("=== MISSINGNESS OVERVIEW ===\n")
@@ -53,7 +63,7 @@ clean_data %>%
        fill = 'Missingness')+
   theme_bw()
 
-## or more variables ####
+# Restrict the display range to keep extreme values from obscuring the main cloud.
 clean_data %>% 
   filter(telomere_insertion_rate < 4, tf_rate < 15) %>% 
   select(TERT_FPKM, tf_rate, telomere_insertion_rate, telomere_content_log2) %>% 
@@ -70,12 +80,12 @@ clean_data %>%
   theme_bw()
 ```
 
-# Distribution comparisons
+# Compare observed and missing TERT groups
 
 ```{r distributions-comparison}
 cat("\n=== Comparison TERT Present vs Missing ===\n")
  
-# Select the relevant numeric and categorical variables
+# Compare the principal continuous telomere measurements.
 numeric_vars <- c('tf_rate', 'telomere_insertion_rate', 
                   'telomere_content_log2', 'TERT_FPKM',
                   'ATAGGG_singleton_dist', 'CTAGGG_singleton_dist', 
@@ -84,10 +94,10 @@ numeric_vars <- c('tf_rate', 'telomere_insertion_rate',
                   'TTCGGG_singleton_dist', 'TTGGGG_singleton_dist',
                   'TTTGGG_singleton_dist')
  
-# Keep only numeric variables that exist in the dataset
+# Keep the analysis robust to source versions that omit a listed measurement.
 numeric_vars <- numeric_vars[numeric_vars %in% names(clean_data)]
  
-# Comparison across numeric variables
+# Summarize each measurement by TERT missingness group.
 comparison_numeric <- data_analysis %>%
   group_by(tert_missing_indicator) %>%
   summarise(
@@ -98,7 +108,7 @@ comparison_numeric <- data_analysis %>%
            .names = '{.col}_{.fn}')
   )
  
-# Present in a more readable format
+# Print variable-level summaries for direct inspection.
 for (var in numeric_vars) {
   cat('---', var, "---\n")
   
@@ -113,7 +123,7 @@ for (var in numeric_vars) {
       '| Median:', round(median(tert_missing, na.rm=T), 4), "\n\n")
 }
  
-# Comparison by cancer_type
+# Check whether TERT availability is concentrated in particular cancer types.
 cat("\n--- cancer_type ---\n")
 comparison_cancer <- data_analysis %>%
   group_by(cancer_type, tert_missing_indicator) %>%
@@ -128,7 +138,7 @@ comparison_cancer <- data_analysis %>%
 cat("TERT Missing % by Cancer Type:\n")
 print(comparison_cancer, n = nrow(comparison_cancer))
 
-# Comparison by alt_status
+# Check whether complete-case modeling could alter ALT-class balance.
 cat("\n--- alt_status ---\n")
 comparison_alt <- data_analysis %>%
   group_by(alt_status, tert_missing_indicator) %>%

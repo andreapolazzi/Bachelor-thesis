@@ -11,6 +11,12 @@ execute:
   freeze: auto
 ---
 
+# Purpose
+
+This notebook models blood telomere fusion rate (`tf_blood_rate`) from the
+remaining telomere features. It compares linear, LASSO, random-forest, and
+two-part approaches under repeated cross-validation and a final held-out test set.
+
 # Setup
 
 ```{r setup}
@@ -71,7 +77,8 @@ r2_fn <- function(actual, predicted) {
 
 # Manual Cross-Validation
 
-We use a 5-fold cross-validation on the training set. We do it manually to have to possibility to further extend to other metrics, methods, or whatever.
+Manual repeated 5-fold cross-validation keeps fold-level predictions,
+coefficients, and feature importances available for direct comparison.
 
 ```{r cv-setup}
 k <- 5

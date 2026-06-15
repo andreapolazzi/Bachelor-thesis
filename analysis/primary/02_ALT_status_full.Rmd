@@ -7,7 +7,7 @@ output: html_document
 
 # Setup
 
-Let's load the dataset and have a look at it.
+Load the PCAWG source table and shared plotting and modeling dependencies.
 
 ```{r setup}
 library(tidyverse)
@@ -25,7 +25,8 @@ data <- read_xlsx(here('data', 'raw', 'PCAWG_variables_PCA_woK.xlsx'))
 summary(data)
 ```
 
-We have to rename columns, set categories as factors, deal with NA values, and handle typing.
+The shared cleaning helper standardizes names, numeric types, missing values, and
+factor reference levels used by downstream models.
 
 ```{r cleaning-data}
 source(here('scripts', 'clean_columns.R'))
@@ -33,7 +34,7 @@ clean_data <- clean_pcawg_data(data)
 summary(clean_data)
 ```
 
-# Define the full dataset
+# Complete-case feature cohort
 
 We must account for the fact that we have many **NA values**, especially in the **TERT_FPKM column**. These rows must be excluded, since further analyses such as PCA or RF require the absence of missing values. Therefore this extended model will use a subset of samples with complete **telomere biology annotations**.
 
@@ -46,9 +47,10 @@ summary(model_data_full)
 
 Now we don't have NA values anymore, but we should be aware of the fact that we are dealing with a **much smaller dataset** (1943 before, 817 now) and some cancer types are underrepresented or totally absent.
 
-# Define the larger dataset
+# Larger cohort without TERT expression
 
-We also keep a dataframe with all observation, thus **dropping the TERT_FPKM column**.
+Dropping `TERT_FPKM` retains substantially more observations and provides a
+sensitivity analysis for conclusions drawn from the smaller complete-case cohort.
 
 ```{r model-data-large}
 model_data_large <- clean_data %>% select(-TERT_FPKM) %>% drop_na()
@@ -73,7 +75,7 @@ corrplot::corrplot(
 )
 ```
 
-# PCA with all features
+# PCA on the complete-case feature set
 
 ```{r PCA_full}
 # model_data_full has alt_status as first column, features after
@@ -98,7 +100,7 @@ bip_full$plot
 ggsave(here('outputs', 'PCA_biplot_all.pdf'), bip_full$plot, width = 7, height = 6)
 ```
 
-# PCA without TERT (more patients)
+# PCA without TERT expression
 
 ```{r pca-no-tert}
 # drop the id/cancer_type columns so alt_status is the first (label) column
@@ -125,7 +127,7 @@ bip_large$plot
 ggsave(here('outputs', 'PCA_biplot_no_TERT.pdf'), bip_large$plot, width = 7, height = 6)
 ```
 
-# PCA Mesenchymal groups
+# PCA by mesenchymal-origin group
 
 Here we repeat the PCA on the full set of telomere features, but label the samples by **mesenchymal grouping** (`cancer_group`: Mesenchymal vs Non-Mesenchymal origin) instead of ALT status. We use the processed dataset which carries this annotation.
 
@@ -167,7 +169,7 @@ mesench_full <- mesench_data %>%
 res_m <- pca_plot(mesench_full, coloring = mesench_full$cancer_group,
                   title = paste0('PCA of all features (with TERT) - mesenchymal grouping (n = ',
                                  nrow(mesench_full), ')'))
-res_m$plot
+res_m$plot + scale_color_manual(values = c('firebrick', 'grey60'))
 summary(res_m$pca)
 ggsave(here('outputs', 'PCA_mesenchymal_all.pdf'), res_m$plot, width = 7, height = 6)
 ```
@@ -181,7 +183,7 @@ comp_m <- ifelse(grepl('singleton_dist', mesench_features),
 bip_m <- pca_biplot(mesench_full, coloring = mesench_full$cancer_group,
                     scale_arrows = 10, compnames = comp_m,
                     title = 'PCA biplot (with TERT) - mesenchymal grouping')
-bip_m$plot
+bip_m$plot+ scale_color_manual(values = c('firebrick', 'grey60'))
 ggsave(here('outputs', 'PCA_biplot_mesenchymal_all.pdf'), bip_m$plot, width = 7, height = 6)
 ```
 
@@ -199,7 +201,7 @@ mesench_large <- mesench_data %>%
 res_m2 <- pca_plot(mesench_large, coloring = mesench_large$cancer_group,
                    title = paste0('PCA without TERT - mesenchymal grouping (n = ',
                                   nrow(mesench_large), ')'))
-res_m2$plot
+res_m2$plot+ scale_color_manual(values = c('firebrick', 'grey60'))
 summary(res_m2$pca)
 ggsave(here('outputs', 'PCA_mesenchymal_no_TERT.pdf'), res_m2$plot, width = 7, height = 6)
 ```
@@ -213,7 +215,7 @@ comp_m2 <- ifelse(grepl('singleton_dist', mesench_features_noT),
 bip_m2 <- pca_biplot(mesench_large, coloring = mesench_large$cancer_group,
                      scale_arrows = 18, compnames = comp_m2,
                      title = 'PCA biplot without TERT - mesenchymal grouping')
-bip_m2$plot
+bip_m2$plot+ scale_color_manual(values = c('firebrick', 'grey60'))
 ggsave(here('outputs', 'PCA_biplot_mesenchymal_no_TERT.pdf'), bip_m2$plot, width = 7, height = 6)
 ```
 
@@ -424,9 +426,15 @@ get_fold_metrics <- function(prob, truth, positive_class = 'ALT-high', threshold
     levels = c(negative_class, positive_class),
     quiet = TRUE
   )
-  
+
+  yb  <- as.integer(truth == positive_class)
+  o   <- order(prob, decreasing = TRUE); ybo <- yb[o]
+  tpp <- cumsum(ybo); fpp <- cumsum(1 - ybo)
+  P   <- tpp / (tpp + fpp); R <- tpp / sum(yb)
+
   tibble(
     auc = as.numeric(auc(roc_obj)),
+    pr_auc = sum((R - c(0, head(R, -1))) * P),
     sensitivity = unname(cm$byClass['Sensitivity']),
     specificity = unname(cm$byClass['Specificity']),
     precision = unname(cm$byClass['Pos Pred Value']),
@@ -495,7 +503,7 @@ logreg_results
 logreg_summary <- logreg_results %>%
   summarise(
     across(
-      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      c(auc, pr_auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
       .names = '{.col}_{.fn}'
     )
@@ -569,7 +577,7 @@ rf_results
 rf_summary <- rf_results %>%
   summarise(
     across(
-      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      c(auc, pr_auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
       .names = '{.col}_{.fn}'
     )
@@ -585,7 +593,7 @@ model_comparison <- all_results %>%
   group_by(model) %>%
   summarise(
     across(
-      c(auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
+      c(auc, pr_auc, sensitivity, specificity, precision, recall, f1, balanced_accuracy),
       list(mean = mean, sd = sd),
       .names = '{.col}_{.fn}'
     ),
